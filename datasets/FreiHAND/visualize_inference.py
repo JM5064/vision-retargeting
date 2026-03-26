@@ -8,20 +8,21 @@ from PIL import Image
 import time
 
 import torch
-from torchvision.transforms import v2
+import albumentations as A
 
-from models.BlazePoseFreiHAND.blazepose import BlazePose
+from models.model import SimpleBaselines
+from models.utils import DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
-from datasets.FreiHAND.visualize_dataloader import add_keypoints, add_heatmap_offsets
+from datasets.FreiHAND.visualize_dataloader import add_keypoints, add_heatmap
+from datasets.FreiHAND.heatmap_inference import heatmap_inference
 
 
-def load_model(model_path, device, num_keypoints=21):
-    print("Using device", device)
+def load_model(model_path, num_keypoints=21):
 
-    model = BlazePose(num_keypoints)
+    model = SimpleBaselines(num_keypoints)
 
     # Load model
-    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+    checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=True)
     model.load_state_dict(checkpoint['state_dict'])
 
     model.eval()
@@ -41,10 +42,10 @@ def inference(model, dataset):
         with torch.no_grad():
             input_tensor = torch.tensor(image).unsqueeze(0)
 
-            keypoint_predictions, heatmap_offset_predictions = model(input_tensor)
+            heatmap_predictions, depth_predictions = model(input_tensor)
 
-            keypoint_predictions = np.array(keypoint_predictions.squeeze())
-            heatmap_offset_predictions = np.array(heatmap_offset_predictions.squeeze())
+            # Convert heatmap preds to keypoints
+            keypoint_predictions = heatmap_inference(heatmap_predictions).squeeze()
 
         # Convert PIL image to numpy
         image = np.array(image)
@@ -57,13 +58,11 @@ def inference(model, dataset):
         # Create keypoint image
         keypoints_image = add_keypoints(image, keypoint_predictions)
 
-        # Create heatmap and offset images
-        heatmap_image, x_offset_image, y_offset_image = add_heatmap_offsets(heatmap_offset_predictions)
+        # Create heatmap image
+        heatmap_image = add_heatmap(heatmap_predictions.squeeze())
 
         cv2.imshow("Keypoints", keypoints_image)
         cv2.imshow("Heatmaps", heatmap_image)
-        cv2.imshow("x offsets", x_offset_image)
-        cv2.imshow("y offsets", y_offset_image)
 
         if cv2.waitKey(0) & 0xFF == ord('q'):
             break
@@ -72,22 +71,20 @@ def inference(model, dataset):
 
 
 if __name__ == "__main__":
-    model_path = "models/BlazePoseFreiHAND/runs/1epoch/best.pt"
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    model_path = "runs/test/last.pt"
 
-    model = load_model(model_path, device)
+    model = load_model(model_path)
 
     images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
     keypoints_path = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
     scale_path = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
     intrinsics_path = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
-    vertices_path = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_verts.json'
 
-    transform = v2.Compose([
-        v2.ToTensor(),
-        v2.Normalize(mean=[0.472, 0.450, 0.413],
+    transform = A.Compose([
+        A.Normalize(mean=[0.472, 0.450, 0.413],
                             std=[0.277, 0.272, 0.273]),
-    ])
+        A.ToTensorV2(),
+    ], keypoint_params=A.KeypointParams(format='xy', remove_invisible=False))
 
     dataset = FreiHAND(
         images_dir=images_dir, 

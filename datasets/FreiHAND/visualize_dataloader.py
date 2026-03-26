@@ -27,12 +27,10 @@ def visualize(dataset):
         keypoints_image = add_keypoints(image, keypoints)
 
         # Create heatmap and offset images
-        heatmap_image, x_offset_image, y_offset_image = add_heatmap_offsets(heatmaps)
+        heatmap_image = add_heatmap(heatmaps)
 
         cv2.imshow("Keypoints", keypoints_image)
         cv2.imshow("Heatmaps", heatmap_image)
-        cv2.imshow("x offsets", x_offset_image)
-        cv2.imshow("y offsets", y_offset_image)
 
         if cv2.waitKey(0) & 0xFF == ord('q'):
             break
@@ -58,42 +56,17 @@ def add_keypoints(image, keypoints, joint_names=None):
     return image
     
 
-def add_heatmap_offsets(heatmaps):
-    """Create heatmap and offset map for each image """
-    num_keypoints = heatmaps.shape[0] // 3
+def add_heatmap(heatmaps):
+    """Create heatmap for each image """
+    num_keypoints = heatmaps.shape[0]
 
     # Combine heatmaps
     combined_heatmap = np.zeros(heatmaps[0].shape)
     for i in range(num_keypoints):
         # if i == 1:
-        combined_heatmap += heatmaps[i]
+        combined_heatmap += np.array(heatmaps[i])
 
-    # Combine x offset maps
-    combined_x_offsets = np.zeros(heatmaps[0].shape)
-    for i in range(num_keypoints, 2 * num_keypoints):
-        combined_x_offsets += heatmaps[i]
-
-    # Combine y offset maps
-    combined_y_offsets = np.zeros(heatmaps[0].shape)
-    for i in range(num_keypoints * 2, 3 * num_keypoints):
-        combined_y_offsets += heatmaps[i]
-
-    # Average them so values don't explode
-    combined_x_offsets /= num_keypoints
-    combined_y_offsets /= num_keypoints
-
-    # Normalize for visualization
-    norm_x = cv2.normalize(combined_x_offsets, None, 0, 255, cv2.NORM_MINMAX)
-    norm_x = norm_x.astype(np.uint8)
-
-    norm_y = cv2.normalize(combined_y_offsets, None, 0, 255, cv2.NORM_MINMAX)
-    norm_y = norm_y.astype(np.uint8)
-
-    # Apply color map for gradient visualization
-    color_x = cv2.applyColorMap(norm_x, cv2.COLORMAP_JET)
-    color_y = cv2.applyColorMap(norm_y, cv2.COLORMAP_JET)
-
-    return combined_heatmap, color_x, color_y
+    return combined_heatmap
 
 
 def main():
