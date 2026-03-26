@@ -5,9 +5,15 @@ import numpy as np
 import time
 
 import torch
+import pytorch_kinematics as pk
 from metrics.mpjpe import mpjpe_3D
 from metrics.pck import pck_2D, pck_3D
-from utils import to_device, log_results
+from models.utils import DEVICE, log_results
+
+from datasets.FreiHAND.heatmap_inference import heatmap_inference
+
+from models.math_utils import xyZ2XYZ
+from losses.pinch_loss import PinchLoss
 
 
 def validate(model, val_loader, loss_func, image_size):
@@ -15,44 +21,58 @@ def validate(model, val_loader, loss_func, image_size):
     all_preds = []
     all_labels = []
     total_combined_loss = 0.0
-    total_regression_loss = 0.0
     total_heatmap_loss = 0.0
-    total_offset_loss = 0.0
+    total_depth_loss = 0.0
 
     mpjpe = 0.0
     pck3D_thresholds = [20, 40]
     pck3Ds = np.zeros(len(pck3D_thresholds))
 
     with torch.no_grad():
-        for inputs, keypoints, heatmaps, offset_masks, Ks, wrist_depths in tqdm(val_loader):
-            inputs = to_device(inputs)
-            keypoints = to_device(keypoints)
-            heatmaps = to_device(heatmaps)
-            offset_masks = to_device(offset_masks)
-            Ks = to_device(Ks)
-            wrist_depths = to_device(wrist_depths)
+        for inputs, keypoints, heatmaps, Ks, wrist_depths, scales in tqdm(val_loader):
+            inputs = inputs.to(DEVICE)
+            keypoints = keypoints.to(DEVICE)
+            heatmaps = heatmaps.to(DEVICE)
+            Ks = Ks.to(DEVICE)
+            wrist_depths = wrist_depths.to(DEVICE)
+            scales = scales.to(DEVICE)
 
-            # Get predictions for regression and heatmap paths
-            regression_outputs, heatmap_outputs = model(inputs)
-            loss, regression_loss, heatmap_loss, offset_loss = loss_func(
-                regression_outputs, keypoints, heatmap_outputs, heatmaps, offset_masks
+            # Get predictions for heatmap path and depth
+            heatmap_outputs, depth_outputs = model(inputs)
+
+            # Get keypoint predictions from heatmap
+            keypoint_predictions = heatmap_inference(heatmap_outputs)
+
+            # Combine xy and depth
+            keypoint_predictions = torch.cat([keypoint_predictions, depth_outputs.unsqueeze(-1)], dim=-1)
+
+            # Convert xyZ back to XYZ
+            XYZ_GT = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
+            XYZ_pred = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
+
+            # Subtract roots
+            XYZ_GT = XYZ_GT - XYZ_GT[:, 0:1, :]
+            XYZ_pred = XYZ_pred - XYZ_pred[:, 0:1, :]
+
+            # Calculate losses
+            loss, heatmap_loss, depth_loss = loss_func(
+                heatmap_outputs, heatmaps, depth_outputs, keypoints[:, :, 2]
             )
             total_combined_loss += loss.item()
-            total_regression_loss += regression_loss.item()
             total_heatmap_loss += heatmap_loss.item()
-            total_offset_loss += offset_loss.item()
+            total_depth_loss += depth_loss.item()
 
-            all_preds.extend(regression_outputs.cpu().numpy().squeeze())
+            all_preds.extend(XYZ_pred.cpu().numpy().squeeze())
             all_labels.extend(keypoints.cpu().numpy())
 
             # Calculate mpjpe on batch
-            batch_mpjpe = mpjpe_3D(regression_outputs, keypoints, Ks, wrist_depths, image_size)
+            batch_mpjpe = mpjpe_3D(XYZ_pred, keypoints, Ks, wrist_depths, image_size)
             # Multiply by batch size to get total pjpe for the batch
             mpjpe += batch_mpjpe.item() * keypoints.shape[0]
 
             # Calculate 3D pcks on batch
             for i in range(len(pck3D_thresholds)):
-                batch_pck = pck_3D(regression_outputs, keypoints, pck3D_thresholds[i], Ks, wrist_depths, image_size)
+                batch_pck = pck_3D(XYZ_pred, keypoints, pck3D_thresholds[i], Ks, wrist_depths, image_size)
                 pck3Ds[i] += batch_pck.item() * keypoints.shape[0]
 
 
@@ -61,9 +81,8 @@ def validate(model, val_loader, loss_func, image_size):
     pck3Ds /= len(all_preds)
 
     average_val_loss = total_combined_loss / len(val_loader)
-    average_val_regression_loss = total_regression_loss / len(val_loader)
     average_val_heatmap_loss = total_heatmap_loss / len(val_loader)
-    average_val_offset_loss = total_offset_loss / len(val_loader)
+    average_val_depth_loss = total_depth_loss / len(val_loader)
     
     # Flatten
     all_preds_flattened = np.concatenate(all_preds, axis=0)
@@ -91,9 +110,8 @@ def validate(model, val_loader, loss_func, image_size):
         "pck@40mm": pck3Ds[1],
         "mpjpe": mpjpe,
         "average_val_loss": average_val_loss,
-        "average_val_regression_loss": average_val_regression_loss,
+        "average_val_depth_loss": average_val_depth_loss,
         "average_val_heatmap_loss": average_val_heatmap_loss,
-        "average_val_offset_loss": average_val_offset_loss
     }
 
     return metrics
@@ -101,18 +119,12 @@ def validate(model, val_loader, loss_func, image_size):
 
 def train(
         model,
-        ik_model,
         num_epochs,
-        train_loader,
-        val_loader,
-        test_loader,
-        loss_func,
-        optimizer,
-        scheduler,
-        start_epoch=0,
-        unfreeze_epoch=40,
+        train_loader, val_loader, test_loader,
+        loss_func, optimizer, scheduler,
+        start_epoch=0, unfreeze_epoch=40,
         image_size=224,
-        runs_dir="models/BlazePoseFreiHAND/runs",
+        runs_dir="runs",
     ):
     log_directory = runs_dir
     # create log file for a new training session
@@ -132,55 +144,47 @@ def train(
                 param.requires_grad = True
 
         total_combined_loss = 0.0
-        total_regression_loss = 0.0
         total_heatmap_loss = 0.0
-        total_offset_loss = 0.0
+        total_depth_loss = 0.0
 
         model.train()
-        for inputs, keypoints, heatmaps, offset_masks, Ks, wrist_depths in tqdm(train_loader):
-            inputs = to_device(inputs)
-            keypoints = to_device(keypoints)
-            heatmaps = to_device(heatmaps)
-            offset_masks = to_device(offset_masks)
+        for inputs, keypoints, heatmaps, _, _, _ in tqdm(train_loader):
+            inputs = inputs.to(DEVICE)
+            keypoints = keypoints.to(DEVICE)
+            heatmaps = heatmaps.to(DEVICE)
 
             optimizer.zero_grad()
 
-            # Get predictions for regression and heatmap paths
-            regression_outputs, heatmap_outputs = model(inputs)
-
-            # Calculate predicted qpos
-            ik_model()
+            # Get predictions for heatmap path and depth
+            heatmap_outputs, depth_outputs = model(inputs)
 
             # Calculate loss
-            loss, regression_loss, heatmap_loss, offset_loss = loss_func(
-                regression_outputs, keypoints, heatmap_outputs, heatmaps, offset_masks
+            loss, heatmap_loss, depth_loss = loss_func(
+                heatmap_outputs, heatmaps, depth_outputs, keypoints[:, :, 2]
             )
             loss.backward()
             optimizer.step()
 
             total_combined_loss += loss.item()
-            total_regression_loss += regression_loss.item()
             total_heatmap_loss += heatmap_loss.item()
-            total_offset_loss += offset_loss.item()
+            total_depth_loss += depth_loss.item()
 
         # print and log metrics
         average_train_loss = total_combined_loss / len(train_loader)
-        average_train_regression_loss = total_regression_loss / len(train_loader)
         average_train_heatmap_loss = total_heatmap_loss / len(train_loader)
-        average_train_offset_loss = total_offset_loss / len(train_loader)
+        average_train_depth_loss = total_depth_loss / len(train_loader)
 
         metrics = validate(model, val_loader, loss_func, image_size)
         metrics["average_train_loss"] = average_train_loss
-        metrics["average_train_regression_loss"] = average_train_regression_loss
+        metrics["average_train_depth_loss"] = average_train_depth_loss
         metrics["average_train_heatmap_loss"] = average_train_heatmap_loss
-        metrics["average_train_offset_loss"] = average_train_offset_loss
 
 
         print(f'Epoch {i+1} Results:')
-        print(f'Train Loss: {average_train_loss} | Regression: {average_train_regression_loss}'
-             f' | Heatmap: {average_train_heatmap_loss} | Offset: {average_train_offset_loss}')
-        print(f'Val Loss:   {metrics["average_val_loss"]} | Regression: {metrics["average_val_regression_loss"]}'
-             f' | Heatmap: {metrics["average_val_heatmap_loss"]} | Offset: {metrics["average_val_offset_loss"]}')
+        print(f'Train Loss: {average_train_loss} | Heatmap: {average_train_heatmap_loss}'
+             f' | Depth: {average_train_depth_loss}')
+        print(f'Val Loss:   {metrics["average_val_loss"]} | Heatmap: {metrics["average_val_heatmap_loss"]}'
+             f' | Depth: {metrics["average_val_depth_loss"]}')
         print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
         print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
         print(f'MPJPE: {metrics["mpjpe"]}')

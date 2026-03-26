@@ -1,5 +1,5 @@
 import torch
-from metrics.math import reproject_xyZ2XYZ
+from models.math_utils import reproject_xyZ2XYZ
 
 
 def mpjpe_3D(preds_kp, labels_kp, K, root_depths, image_size):

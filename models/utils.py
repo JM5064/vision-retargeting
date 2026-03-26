@@ -2,13 +2,11 @@ import torch
 import os
 
 
-def to_device(obj):
-    if torch.cuda.is_available():
-        obj = obj.to("cuda")
-    elif torch.backends.mps.is_available():
-        obj = obj.to("mps")
-
-    return obj
+DEVICE = torch.device(
+    "cuda" if torch.cuda.is_available() 
+    else "mps" if torch.backends.mps.is_available() 
+    else "cpu"
+)
 
 
 def log_results(file_path, metrics):

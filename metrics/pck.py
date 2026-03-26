@@ -1,5 +1,5 @@
 import torch
-from metrics.math import reproject_xyZ2XYZ
+from models.math_utils import reproject_xyZ2XYZ
 
 
 def pck_2D(preds_kp, labels_kp, percent, norm_p1, norm_p2):

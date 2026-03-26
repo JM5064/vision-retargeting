@@ -1,27 +1,23 @@
 """Usage:
-python -m models.BlazePoseFreiHAND.train_main
+python -m models.train_main
 """
 
 import random
-from PIL import Image
 import numpy as np
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-import torchvision
-from torchvision import datasets
 from torchvision.transforms import v2
 import albumentations as A
 
-from .blazepose import BlazePose
-from .train import train, to_device
-from models.utils import load_checkpoint
+from models.model import SimpleBaselines
+from models.train import train
+from models.utils import load_checkpoint, DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
 
-from .losses.combined_loss import CombinedLoss
+from losses.combined_loss import CombinedLoss
 
 
 if __name__ == "__main__":
@@ -56,28 +52,28 @@ if __name__ == "__main__":
     # val_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
 
     # 64 images for testing
-    # train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/rgb'
-    # val_images_dir = train_images_dir
+    train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/rgb'
+    val_images_dir = train_images_dir
 
-    # train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_xyz.json'
-    # train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_K.json'
-    # train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_scale.json'
+    train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_xyz.json'
+    train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_K.json'
+    train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_scale.json'
 
-    # val_kpts_json = train_kpts_json
-    # val_intrinsics_json = train_intrinsics_json
-    # val_scale_json = train_scale_json
+    val_kpts_json = train_kpts_json
+    val_intrinsics_json = train_intrinsics_json
+    val_scale_json = train_scale_json
 
     # Train set as val set for testing
-    val_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
-    train_images_dir = val_images_dir
+    # val_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
+    # train_images_dir = val_images_dir
 
-    val_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
-    val_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
-    val_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
+    # val_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
+    # val_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
+    # val_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
 
-    train_kpts_json = val_kpts_json
-    train_intrinsics_json = val_intrinsics_json
-    train_scale_json = val_scale_json
+    # train_kpts_json = val_kpts_json
+    # train_intrinsics_json = val_intrinsics_json
+    # train_scale_json = val_scale_json
 
 
     train_dataset = FreiHAND(
@@ -106,7 +102,10 @@ if __name__ == "__main__":
 
     num_keypoints = 21
 
-    model = BlazePose(num_keypoints=num_keypoints)
+
+    # --- INITIALIZE KEYPOINT MODEL ---
+
+    model = SimpleBaselines(num_keypoints=num_keypoints)
     
     # Load in pretraining weights
     # weights = torch.load("models/BlazePose/runs_pretraining/30epochs/best.pt")
@@ -119,7 +118,7 @@ if __name__ == "__main__":
     # for param in model.bb2.parameters():
     #     param.requires_grad = False
 
-    model = to_device(model)
+    model = model.to(DEVICE)
 
     adamW_params = {
         "lr": 1e-3,
@@ -147,12 +146,13 @@ if __name__ == "__main__":
 
     train(
         model, 
-        total_epochs, 
+        num_epochs=total_epochs, 
         start_epoch=0,
         train_loader=train_loader, 
         val_loader=val_loader, 
         test_loader=test_loader, 
         loss_func=CombinedLoss(), 
         optimizer=optimizer, 
-        scheduler=scheduler
+        scheduler=scheduler,
+        runs_dir='runs'
     )

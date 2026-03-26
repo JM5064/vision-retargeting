@@ -8,16 +8,7 @@ class HeatmapLoss(nn.Module):
         super().__init__()
 
 
-    def forward(self, preds, heatmap_offset_labels):
-        if preds.shape != heatmap_offset_labels.shape:
-            print("Uh oh, heatmaps predictions and labels have differing shapes", preds.shape, heatmap_offset_labels.shape)
-
-        num_keypoints = heatmap_offset_labels.shape[1] // 3
-
-        # Extract heatmap labels and preds
-        heatmap_labels = heatmap_offset_labels[:, :num_keypoints, :, :]
-        heatmap_preds = preds[:, :num_keypoints, :, :]
-
+    def forward(self, heatmap_preds, heatmap_labels):
         # Calculate heatmap loss
         heatmap_loss = self.get_heatmap_loss(heatmap_preds, heatmap_labels)
 
@@ -25,8 +16,11 @@ class HeatmapLoss(nn.Module):
     
 
     def get_heatmap_loss(self, heatmap_preds, heatmap_labels):
+        # Weight heatmap centers more
+        weight = 1 + heatmap_labels * 5
+
         # Calculate squared errors between each pixel
-        squared_errors = (heatmap_preds - heatmap_labels) ** 2
+        squared_errors = weight * (heatmap_preds - heatmap_labels) ** 2
         
         # Average squared errors
         loss = squared_errors.mean()
@@ -210,4 +204,7 @@ if __name__ == "__main__":
 
     loss = criterion(outputs, labels, regression_labels)
     print("Total loss:", loss)
+
+
+
 
