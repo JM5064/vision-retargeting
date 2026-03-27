@@ -96,7 +96,10 @@ class FreiHAND(Dataset):
         # Create heatmaps
         heatmaps = self.create_heatmaps(projected_keypoints)
 
-        return image, tensor_keypoints, heatmaps, K, wrist_depth, scale
+        # Convert image to numpy
+        np_image = np.array(image)
+
+        return np_image, tensor_keypoints, heatmaps, K, wrist_depth, scale
 
 
     def project_keypoints(self, keypoints, K):

@@ -47,12 +47,8 @@ def validate(model, val_loader, loss_func, image_size):
             keypoint_predictions = torch.cat([keypoint_predictions, depth_outputs.unsqueeze(-1)], dim=-1)
 
             # Convert xyZ back to XYZ
-            XYZ_GT = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
-            XYZ_pred = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
-
-            # Subtract roots
-            XYZ_GT = XYZ_GT - XYZ_GT[:, 0:1, :]
-            XYZ_pred = XYZ_pred - XYZ_pred[:, 0:1, :]
+            labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
+            pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
 
             # Calculate losses
             loss, heatmap_loss, depth_loss = loss_func(
@@ -62,17 +58,17 @@ def validate(model, val_loader, loss_func, image_size):
             total_heatmap_loss += heatmap_loss.item()
             total_depth_loss += depth_loss.item()
 
-            all_preds.extend(XYZ_pred.cpu().numpy().squeeze())
+            all_preds.extend(keypoint_predictions.cpu().numpy().squeeze())
             all_labels.extend(keypoints.cpu().numpy())
 
             # Calculate mpjpe on batch
-            batch_mpjpe = mpjpe_3D(XYZ_pred, keypoints, Ks, wrist_depths, image_size)
+            batch_mpjpe = mpjpe_3D(pred_XYZ, labels_XYZ)
             # Multiply by batch size to get total pjpe for the batch
             mpjpe += batch_mpjpe.item() * keypoints.shape[0]
 
             # Calculate 3D pcks on batch
             for i in range(len(pck3D_thresholds)):
-                batch_pck = pck_3D(XYZ_pred, keypoints, pck3D_thresholds[i], Ks, wrist_depths, image_size)
+                batch_pck = pck_3D(pred_XYZ, labels_XYZ, pck3D_thresholds[i])
                 pck3Ds[i] += batch_pck.item() * keypoints.shape[0]
 
 
@@ -97,7 +93,7 @@ def validate(model, val_loader, loss_func, image_size):
     preds_kp = preds_concat.view(-1, 21, 3)
     labels_kp = labels_concat.view(-1, 21, 3)
 
-    # Calculate pck metrics
+    # Calculate 2D pck metrics
     # For FreiHAND: p1 = 9 (middle finger bottom), p2 = 12 (middle finger top) (not conventional)
     pck005 = pck_2D(preds_kp[..., :2], labels_kp[..., :2], 0.05, 9, 12).item()
     pck02 = pck_2D(preds_kp[..., :2], labels_kp[..., :2], 0.2, 9, 12).item()
@@ -137,11 +133,6 @@ def train(
     # training loop
     for i in range(start_epoch, num_epochs):
         print(f'Epoch {i+1}/{num_epochs}')
-
-        if i == unfreeze_epoch:
-            print("Unfreezing initial layer(s)")
-            for param in model.bb1.parameters():
-                param.requires_grad = True
 
         total_combined_loss = 0.0
         total_heatmap_loss = 0.0

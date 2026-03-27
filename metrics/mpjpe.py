@@ -2,33 +2,15 @@ import torch
 from models.math_utils import reproject_xyZ2XYZ
 
 
-def mpjpe_3D(preds_kp, labels_kp, K, root_depths, image_size):
+def mpjpe_3D(preds_XYZ, labels_XYZ):
     """Calculates MPJPE (mean per joint position error)
     args:
-        preds_kp: torch tensor [batch, num_keypoints, 3] predicted keypoints
-        labels_kp: torch tensor [batch, num_keypoints, 3] GT keypoints
-        K: [batch, instrinsics matrix
-        root_depths: [batch, depth normalization scalar
-        image_size: int
+        preds_XYZ: torch tensor [batch, num_keypoints, 3] predicted 3D keypoints
+        labels_XYZ: torch tensor [batch, num_keypoints, 3] GT 3D keypoints
 
     returns:
         mpjpe in millimeters
     """
-
-    preds_kp = preds_kp.clone()
-    labels_kp = labels_kp.clone()
-
-    # Unnormalize x, y
-    preds_kp[:, :, :2] *= image_size
-    labels_kp[:, :, :2] *= image_size
-
-    # Unnormalize z
-    preds_kp[:, :, 2] += root_depths[:, None]
-    labels_kp[:, :, 2] += root_depths[:, None]
-
-    # Reproject coordinates
-    preds_XYZ = reproject_xyZ2XYZ(preds_kp, K)
-    labels_XYZ = reproject_xyZ2XYZ(labels_kp, K)
 
     # Calculate MPJPE
     distances = torch.norm(preds_XYZ - labels_XYZ, dim=-1)
@@ -41,6 +23,7 @@ def mpjpe_3D(preds_kp, labels_kp, K, root_depths, image_size):
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
     from datasets.FreiHAND.freihand_dataset import FreiHAND
+    from models.math_utils import xyZ2XYZ
 
     images_dir =      'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/rgb'
     keypoints_json =  'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_xyz.json'
@@ -51,18 +34,18 @@ if __name__ == "__main__":
 
     dl = DataLoader(freihand, batch_size=1, shuffle=False)
 
-    for np_image, tensor_keypoints, heatmaps, offset_masks, K, wrist_depth in dl:
+    for np_image, tensor_keypoints, heatmaps, K, wrist_depth, scale in dl:
         preds_kp = tensor_keypoints.clone()
         labels_kp = tensor_keypoints.clone()
 
-        preds_kp[:, 0, 0] = 0
+        preds_kp[:, 0, 2] = 0.2
+        print(preds_kp)
+        print(labels_kp)
 
-        print("preds_kp", preds_kp)
-        print("labels_kp", labels_kp)
-        print("K", K)
-        print("wrist_depth", wrist_depth)
+        predsXYZ = xyZ2XYZ(preds_kp, 224, K, wrist_depth, scale)
+        labelsXYZ = xyZ2XYZ(labels_kp, 224, K, wrist_depth, scale)
 
-        mpjpe = mpjpe_3D(preds_kp, labels_kp, K, wrist_depth, 224)
+        mpjpe = mpjpe_3D(predsXYZ, labelsXYZ)
         print("mpjpe:", mpjpe)
 
         break

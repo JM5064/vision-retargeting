@@ -6,7 +6,7 @@ from losses.heatmap_loss import HeatmapLoss
 
 class CombinedLoss(nn.Module):
 
-    def __init__(self, a=1, b=1):
+    def __init__(self, a=10, b=1):
         super().__init__()
 
         self.depth_loss = DepthLoss()

@@ -91,34 +91,16 @@ def pck_2D_visibile(preds_kp, labels_kp, percent, norm_p1, norm_p2):
     return pck
 
 
-def pck_3D(preds_kp, labels_kp, threshold, K, root_depths, image_size):
+def pck_3D(preds_XYZ, labels_XYZ, threshold):
     """Calculate pck for 3D keypoints. A keypoint is considered correct if it's within a millimeter threshold
     args:
-        preds_kp: [batch, num_keypoints, 2]
-        labels_kp: [batch, num_keypoints, 2]
+        preds_XYZ: torch tensor [batch, num_keypoints, 3] predicted 3D keypoints
+        labels_XYZ: torch tensor [batch, num_keypoints, 3] GT 3D keypoints
         threshold: number, in millimeters
-        K: [batch, instrinsics matrix
-        root_depths: [batch, depth normalization scalar
-        image_size: int
 
     returns:
         pck: % correct keypoints according to threshold    
     """
-
-    preds_kp = preds_kp.clone()
-    labels_kp = labels_kp.clone()
-
-    # Unnormalize x, y
-    preds_kp[:, :, :2] *= image_size
-    labels_kp[:, :, :2] *= image_size
-
-    # Unnormalize z
-    preds_kp[:, :, 2] += root_depths[:, None]
-    labels_kp[:, :, 2] += root_depths[:, None]
-
-    # Reproject coordinates
-    preds_XYZ = reproject_xyZ2XYZ(preds_kp, K)
-    labels_XYZ = reproject_xyZ2XYZ(labels_kp, K)
 
     # Calculate distances between preds and GT in millimeters
     distances = torch.norm(preds_XYZ - labels_XYZ, dim=2) * 1000

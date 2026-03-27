@@ -108,15 +108,13 @@ if __name__ == "__main__":
     model = SimpleBaselines(num_keypoints=num_keypoints)
     
     # Load in pretraining weights
-    # weights = torch.load("models/BlazePose/runs_pretraining/30epochs/best.pt")
-    # model.bb1.load_state_dict(weights["bb1"])
-    # model.bb2.load_state_dict(weights["bb2"])
-
-    # for param in model.bb1.parameters():
-    #     param.requires_grad = False
-
-    # for param in model.bb2.parameters():
-    #     param.requires_grad = False
+    weights = torch.load("runs/mpii_sb.pt", map_location=torch.device('cpu'))
+    filtered_weights = {
+        k: v for k, v in weights.items()
+        if k.startswith("backbone") 
+        or k.startswith("deconv_layers")
+    }
+    model.load_state_dict(filtered_weights, strict=False)
 
     model = model.to(DEVICE)
 
