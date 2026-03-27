@@ -40,40 +40,40 @@ if __name__ == "__main__":
     ], keypoint_params=A.KeypointParams(format='xy', remove_invisible=False))
 
     # Full dataset
-    # train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training/rgb'
-    # val_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
+    train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training/rgb'
+    test_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
 
-    # train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_xyz.json'
-    # train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_K.json'
-    # train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_scale.json'
+    train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_xyz.json'
+    train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_K.json'
+    train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_scale.json'
 
-    # val_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
-    # val_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
-    # val_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
+    test_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
+    test_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
+    test_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
 
     # 64 images for testing
-    train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/rgb'
-    val_images_dir = train_images_dir
+    # train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/rgb'
+    # test_images_dir = train_images_dir
 
-    train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_xyz.json'
-    train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_K.json'
-    train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_scale.json'
+    # train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_xyz.json'
+    # train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_K.json'
+    # train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_scale.json'
 
-    val_kpts_json = train_kpts_json
-    val_intrinsics_json = train_intrinsics_json
-    val_scale_json = train_scale_json
+    # test_kpts_json = train_kpts_json
+    # test_intrinsics_json = train_intrinsics_json
+    # test_scale_json = train_scale_json
 
-    # Train set as val set for testing
-    # val_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
-    # train_images_dir = val_images_dir
+    # Train set as test set for testing
+    # test_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
+    # train_images_dir = test_images_dir
 
-    # val_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
-    # val_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
-    # val_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
+    # test_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
+    # test_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
+    # test_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
 
-    # train_kpts_json = val_kpts_json
-    # train_intrinsics_json = val_intrinsics_json
-    # train_scale_json = val_scale_json
+    # train_kpts_json = test_kpts_json
+    # train_intrinsics_json = test_intrinsics_json
+    # train_scale_json = test_scale_json
 
 
     train_dataset = FreiHAND(
@@ -82,17 +82,25 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=train_transform,
-    )
-    
-    val_dataset = FreiHAND(
-        images_dir=val_images_dir, 
-        keypoints_json=val_kpts_json, 
-        intrinsics_json=val_intrinsics_json,
-        scale_json=train_scale_json,
-        transform=transform
+        percent=0.9
     )
 
-    test_dataset = val_dataset
+    val_dataset = FreiHAND(
+        images_dir=train_images_dir, 
+        keypoints_json=train_kpts_json, 
+        intrinsics_json=train_intrinsics_json,
+        scale_json=train_scale_json,
+        transform=train_transform,
+        percent=-0.1
+    )
+    
+    test_dataset = FreiHAND(
+        images_dir=test_images_dir, 
+        keypoints_json=test_kpts_json, 
+        intrinsics_json=test_intrinsics_json,
+        scale_json=train_scale_json,
+        transform=transform,
+    )
 
     batch_size = 32
 

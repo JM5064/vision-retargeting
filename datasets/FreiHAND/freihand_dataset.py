@@ -25,7 +25,8 @@ class FreiHAND(Dataset):
         scale_json,
         transform=None, 
         image_size=224, 
-        heatmap_size=56
+        heatmap_size=56,
+        percent=1
     ):
         self.images_dir = images_dir
         self.image_names = sorted(os.listdir(images_dir))
@@ -34,16 +35,31 @@ class FreiHAND(Dataset):
         self.intrinsics_json = json.load(open(intrinsics_json, "r"))
         self.scale_json = json.load(open(scale_json, "r"))
 
-        # data contains (image name, xyz keypoints, intrinsics matrix K) for each image
+        # Training images are duplicated 4 times with differing backgrounds
+        num_unique_images = len(self.keypoints_json)
+
+        # Calculate how many images to use
+        num_to_take = int(num_unique_images * abs(percent))
+
+        if percent > 0:
+            # Grab the first X percent
+            subset_range = range(0, num_to_take)
+        elif percent < 0:
+            # Grab the last X percent
+            subset_range = range(num_unique_images - num_to_take, num_unique_images)
+
+        # Data contains (image name, xyz keypoints, intrinsics matrix K) for each image
         self.data = []
         for i in range(len(self.image_names)):
+            if i % num_unique_images not in subset_range:
+                continue
+
             self.data.append(
                 (
                     self.image_names[i], 
-                    # training images are duplicated 4 times with differing backgrounds
-                    np.array(self.keypoints_json[i % len(self.keypoints_json)], dtype=np.float32),
-                    np.array(self.intrinsics_json[i % len(self.intrinsics_json)], dtype=np.float32),
-                    np.array(self.scale_json[i % len(self.scale_json)], dtype=np.float32)
+                    np.array(self.keypoints_json[i % num_unique_images], dtype=np.float32),
+                    np.array(self.intrinsics_json[i % num_unique_images], dtype=np.float32),
+                    np.array(self.scale_json[i % num_unique_images], dtype=np.float32)
                 )
             )
 
