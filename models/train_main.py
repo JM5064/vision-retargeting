@@ -82,7 +82,7 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=train_transform,
-        percent=0.9
+        percent=0.18
     )
 
     val_dataset = FreiHAND(
@@ -91,7 +91,7 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=train_transform,
-        percent=-0.1
+        percent=-0.02
     )
     
     test_dataset = FreiHAND(
@@ -106,7 +106,7 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False ,num_workers=1)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
 
     num_keypoints = 21
 
