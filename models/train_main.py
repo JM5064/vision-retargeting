@@ -82,7 +82,7 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=train_transform,
-        percent=0.18
+        percent=0.95
     )
 
     val_dataset = FreiHAND(
@@ -91,7 +91,7 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=train_transform,
-        percent=-0.02
+        percent=-0.05
     )
     
     test_dataset = FreiHAND(
@@ -145,10 +145,10 @@ if __name__ == "__main__":
         return optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[num_warmup_epochs])
 
     warmup_epochs = 10
-    total_epochs = 50
+    total_epochs = 75
     scheduler = convnext_scheduler(optimizer, warmup_epochs, total_epochs)
 
-    # model, optimizer, scheduler, epoch = load_checkpoint("models/BlazePoseFreiHAND/runs/test/last.pt", model, optimizer, scheduler)
+    # model, optimizer, scheduler, epoch = load_checkpoint("runs/2026.3.27/last.pt", model, optimizer, scheduler)
 
     train(
         model, 

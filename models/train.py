@@ -131,15 +131,27 @@ def train(
     best_pck005 = 0
 
     # training loop
-    for i in range(start_epoch, num_epochs):
-        print(f'Epoch {i+1}/{num_epochs}')
+    steps_per_epoch = len(train_loader) // 8
+    train_iterator = iter(train_loader)
 
+    for epoch in range(start_epoch, num_epochs):
+        print(f'Epoch {epoch+1}/{num_epochs}')
+        
         total_combined_loss = 0.0
         total_heatmap_loss = 0.0
         total_depth_loss = 0.0
 
         model.train()
-        for inputs, keypoints, heatmaps, _, _, _ in tqdm(train_loader):
+        for _ in tqdm(range(steps_per_epoch)):
+            try:
+                # Grab the next batch from the iterator
+                inputs, keypoints, heatmaps, _, _, _ = next(train_iterator)
+            except StopIteration:
+                # Reset the iterator when finished one real epoch
+                print("Finished loop of dataset")
+                train_iterator = iter(train_loader)
+                inputs, keypoints, heatmaps, _, _, _ = next(train_iterator)
+
             inputs = inputs.to(DEVICE)
             keypoints = keypoints.to(DEVICE)
             heatmaps = heatmaps.to(DEVICE)
@@ -171,11 +183,11 @@ def train(
         metrics["average_train_heatmap_loss"] = average_train_heatmap_loss
 
 
-        print(f'Epoch {i+1} Results:')
+        print(f'Epoch {epoch+1} Results:')
         print(f'Train Loss: {average_train_loss} | Heatmap: {average_train_heatmap_loss}'
-             f' | Depth: {average_train_depth_loss}')
+            f' | Depth: {average_train_depth_loss}')
         print(f'Val Loss:   {metrics["average_val_loss"]} | Heatmap: {metrics["average_val_heatmap_loss"]}'
-             f' | Depth: {metrics["average_val_depth_loss"]}')
+            f' | Depth: {metrics["average_val_depth_loss"]}')
         print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
         print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
         print(f'MPJPE: {metrics["mpjpe"]}')
@@ -188,7 +200,7 @@ def train(
 
         # save best model
         checkpoint = {
-            'epoch': i + 1,
+            'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict()
@@ -204,8 +216,8 @@ def train(
         torch.save(checkpoint, log_directory + "/last.pt")
 
         # Save a model every 20 epochs
-        if (i+1) % 20 == 0:
-            torch.save(checkpoint, f'{log_directory}/epoch{i+1}.pt')
+        if (epoch+1) % 20 == 0:
+            torch.save(checkpoint, f'{log_directory}/epoch{epoch+1}.pt')
 
 
     # test model and print/log testing metrics
