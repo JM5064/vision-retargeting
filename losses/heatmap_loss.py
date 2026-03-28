@@ -23,7 +23,7 @@ class HeatmapLoss(nn.Module):
         squared_errors = weight * (heatmap_preds - heatmap_labels) ** 2
         
         # Average squared errors
-        loss = squared_errors.mean()
+        loss = squared_errors.sum(dim=(-1, -2)).mean()
 
         return loss
 
