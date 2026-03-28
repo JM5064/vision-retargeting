@@ -90,7 +90,7 @@ if __name__ == "__main__":
         keypoints_json=train_kpts_json, 
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
-        transform=train_transform,
+        transform=transform,
         percent=-0.05
     )
     
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         images_dir=test_images_dir, 
         keypoints_json=test_kpts_json, 
         intrinsics_json=test_intrinsics_json,
-        scale_json=train_scale_json,
+        scale_json=test_scale_json,
         transform=transform,
     )
 
