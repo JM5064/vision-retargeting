@@ -40,6 +40,7 @@ def visualize(dataset):
 
 def add_keypoints(image, keypoints, joint_names=None):
     image = image.copy()
+    keypoints = keypoints.clone()
     h, w, _ = image.shape
         
     # Unnormalize keypoints

@@ -10,11 +10,15 @@ import time
 import torch
 import albumentations as A
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 from models.model import SimpleBaselines
 from models.utils import DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
 from datasets.FreiHAND.visualize_dataloader import add_keypoints, add_heatmap
 from datasets.FreiHAND.heatmap_inference import heatmap_inference
+from models.math_utils import xyZ2XYZ
 
 
 def load_model(model_path, num_keypoints=21):
@@ -37,7 +41,16 @@ def denormalize_color(tensor, mean, std):
 
 def inference(model, dataset):
     """Run model inference and visualize keypoint, heatmap, and offset results"""
-    for image, _, _, _, _, _ in dataset:
+    plt.ion() # Interactive mode for matplotlib
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot(111, projection='3d')
+
+    for image, gt_keypoints, _, K, wrist_depth, scale in dataset:
+        gt_keypoints = torch.tensor(gt_keypoints).unsqueeze(dim=0)
+        K = torch.tensor(K).unsqueeze(dim=0)
+        wrist_depth = torch.tensor(wrist_depth).unsqueeze(0)
+        scale = torch.tensor(scale).unsqueeze(0)
+
         # Evaluate model
         with torch.no_grad():
             input_tensor = torch.tensor(image).unsqueeze(0)
@@ -61,6 +74,10 @@ def inference(model, dataset):
         # Create heatmap image
         heatmap_image = add_heatmap(heatmap_predictions.squeeze())
 
+        pred_xyz = torch.cat([keypoint_predictions.unsqueeze(0), depth_predictions.unsqueeze(-1)], dim=-1)
+        create_3d_visualization(pred_xyz, gt_keypoints, K, wrist_depth, scale, ax)
+        plt.draw()
+
         cv2.imshow("Keypoints", keypoints_image)
         cv2.imshow("Heatmaps", heatmap_image)
 
@@ -68,10 +85,75 @@ def inference(model, dataset):
             break
 
     cv2.destroyAllWindows()
+    plt.ioff()
+    plt.show()
+
+
+def create_3d_visualization(pred_keypoints, gt_keypoints, K, wrist_depth, scale, ax):
+    pred_XYZ = xyZ2XYZ(pred_keypoints, 224, K, wrist_depth, scale)
+    gt_XYZ = xyZ2XYZ(gt_keypoints, 224, K, wrist_depth, scale)
+
+    plot_hand_3d(gt_XYZ, pred_XYZ, ax)
+
+
+def get_skeleton_lines():
+    """Returns the pairs of joint indices that form the hand skeleton."""
+    # Connections: (start_joint, end_joint)
+    return [
+        (0, 1), (1, 2), (2, 3), (3, 4),        # Thumb
+        (0, 5), (5, 6), (6, 7), (7, 8),        # Index
+        (0, 9), (9, 10), (10, 11), (11, 12),   # Middle
+        (0, 13), (13, 14), (14, 15), (15, 16), # Ring
+        (0, 17), (17, 18), (18, 19), (19, 20)  # Pinky
+    ]
+
+
+def plot_hand_3d(gt_3d: np.ndarray, pred_3d: np.ndarray, ax):
+    gt_3d = gt_3d.squeeze()
+    pred_3d = pred_3d.squeeze()
+
+    ax.cla()  # 🔑 clear previous frame
+
+    lines = get_skeleton_lines()
+
+    # Joints
+    ax.scatter(gt_3d[:, 0], gt_3d[:, 1], gt_3d[:, 2], c="blue", s=30, label="GT")
+    ax.scatter(pred_3d[:, 0], pred_3d[:, 1], pred_3d[:, 2], c="red", s=30, label="Pred")
+
+    # Skeleton lines
+    for i, j in lines:
+        ax.plot(
+            [gt_3d[i, 0], gt_3d[j, 0]],
+            [gt_3d[i, 1], gt_3d[j, 1]],
+            [gt_3d[i, 2], gt_3d[j, 2]],
+            c="blue",
+            linewidth=2,
+        )
+        ax.plot(
+            [pred_3d[i, 0], pred_3d[j, 0]],
+            [pred_3d[i, 1], pred_3d[j, 1]],
+            [pred_3d[i, 2], pred_3d[j, 2]],
+            c="red",
+            linewidth=2,
+        )
+
+    ax.set_title("GT (blue) vs Pred (red)")
+    ax.legend()
+
+    # Equal scaling
+    all_pts = np.vstack([gt_3d, pred_3d])
+    mins = all_pts.min(axis=0)
+    maxs = all_pts.max(axis=0)
+    centers = (mins + maxs) / 2.0
+    max_range = (maxs - mins).max() / 2.0
+
+    ax.set_xlim(centers[0] - max_range, centers[0] + max_range)
+    ax.set_ylim(centers[1] - max_range, centers[1] + max_range)
+    ax.set_zlim(centers[2] - max_range, centers[2] + max_range)
 
 
 if __name__ == "__main__":
-    model_path = "runs/test/last.pt"
+    model_path = "runs/2026.3.27/last.pt"
 
     model = load_model(model_path)
 
