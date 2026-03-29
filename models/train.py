@@ -173,9 +173,9 @@ def train(
             total_depth_loss += depth_loss.item()
 
         # print and log metrics
-        average_train_loss = total_combined_loss / len(train_loader)
-        average_train_heatmap_loss = total_heatmap_loss / len(train_loader)
-        average_train_depth_loss = total_depth_loss / len(train_loader)
+        average_train_loss = total_combined_loss / steps_per_epoch
+        average_train_heatmap_loss = total_heatmap_loss / steps_per_epoch
+        average_train_depth_loss = total_depth_loss / steps_per_epoch
 
         metrics = validate(model, val_loader, loss_func, image_size)
         metrics["average_train_loss"] = average_train_loss
