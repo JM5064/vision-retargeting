@@ -54,3 +54,18 @@ def get_positions(fk_result):
     positions = stacked_matrices[:, :, :3, 3]
 
     return positions
+
+
+def get_positions(fk_result):
+    link_names = [
+        "base_link", "link_0.0", "link_1.0", "link_2.0", "link_3.0", "link_3.0_tip", 
+        "link_4.0", "link_5.0", "link_6.0", "link_7.0", "link_7.0_tip", 
+        "link_8.0", "link_9.0", "link_10.0", "link_11.0", "link_11.0_tip", 
+        "link_12.0", "link_13.0", "link_14.0", "link_15.0", "link_15.0_tip"
+    ]
+
+    matrices = [fk_result[name].get_matrix() for name in link_names]
+    stacked_matrices = torch.stack(matrices) # [num_links, batch, 4, 4]
+    stacked_matrices = stacked_matrices.transpose(0, 1) # [batch, num_links, 4, 4]
+    
+    return stacked_matrices[:, :, :3, 3] # [batch, num_links, 3]

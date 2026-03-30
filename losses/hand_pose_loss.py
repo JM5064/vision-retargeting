@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from models.utils import freihand_to_allegro
+
 
 class HandPoseLoss(nn.Module):
 
@@ -10,16 +12,13 @@ class HandPoseLoss(nn.Module):
         self.beta = beta
 
 
+    def forward(self, pred_positions, gt_positions):
+        # Lhand pose = p h thumb − p r thumb 2 2
 
-    def forward(self, pred_positions, gt_positions, pred_qpos, gt_qpos):
-        # Lhand pose = p h thumb − p r thumb 2 2 + βrot angle(q h wrist, q r wrist)
+        thumb_gt_positions = gt_positions[:, freihand_to_allegro(4), :]
+        thumb_pred_positions = pred_positions[:, freihand_to_allegro(4), :]
 
         # Calculate thumb distances
-        thumb_distances = 0
+        thumb_distances = torch.sum((thumb_pred_positions - thumb_gt_positions)**2, dim=-1).mean()
 
-        # Calculate angle difference between wrists
-        wrist_angle = 0
-
-        return thumb_distances + self.beta * thumb_distances
-
-
+        return thumb_distances

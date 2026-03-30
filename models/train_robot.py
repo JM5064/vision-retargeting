@@ -14,6 +14,7 @@ from datasets.FreiHAND.heatmap_inference import heatmap_inference
 
 from models.math_utils import xyZ2XYZ, get_positions
 from losses.pinch_loss import PinchLoss
+from losses.hand_pose_loss import HandPoseLoss
 
 
 def validate(model, val_loader, loss_func, image_size):
@@ -171,7 +172,6 @@ def train(
             # Combine xy and depth
             keypoint_predictions = torch.cat([keypoint_predictions, depth_outputs.unsqueeze(-1)], dim=-1)
 
-
             # Convert xyZ back to XYZ
             XYZ_GT = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
             XYZ_pred = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
@@ -181,20 +181,19 @@ def train(
             XYZ_pred = XYZ_pred - XYZ_pred[:, 0:1, :]
 
             # Calculate predicted and GT qpos
-            qpos_GT = ik_model.forward_batch(XYZ_GT)
-            qpos_pred = ik_model.forward_batch(XYZ_pred)
+            gt_qpos = ik_model.forward_batch(XYZ_GT)
+            pred_qpos = ik_model.forward_batch(XYZ_pred)
 
-            print(XYZ_pred.device, qpos_pred.device)
             # Calculate FK
-            GT_pos = get_positions(fk_model.forward_kinematics(qpos_GT))
-            pred_pos = get_positions(fk_model.forward_kinematics(qpos_pred))
+            gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
+            pred_pos = get_positions(fk_model.forward_kinematics(pred_qpos))
 
 
-            pinch_loss = PinchLoss().forward(pred_pos, XYZ_GT) * 100
-            print(pred_pos[0])
-            print()
-            print(XYZ_GT[0])
+            pinch_loss = PinchLoss().forward(pred_pos, XYZ_GT)
+            hand_pose_loss = HandPoseLoss(beta=0.5).forward(pred_pos, gt_pos, pred_qpos, gt_qpos)
+
             print("Pinch loss:", pinch_loss)
+            print("Hand pose loss:", hand_pose_loss)
 
             # Calculate loss
             loss, heatmap_loss, depth_loss = loss_func(
