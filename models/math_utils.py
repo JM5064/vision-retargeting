@@ -45,3 +45,12 @@ def xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales):
     XYZ *= scales.view(-1, 1, 1)
 
     return XYZ
+
+
+def get_positions(fk_result):
+    matrices = [fk_result[key].get_matrix() for key in sorted(fk_result.keys())]
+    stacked_matrices = torch.stack(matrices)
+    stacked_matrices = stacked_matrices.transpose(0, 1)
+    positions = stacked_matrices[:, :, :3, 3]
+
+    return positions

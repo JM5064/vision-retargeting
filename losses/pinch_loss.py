@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from models.utils import freihand_to_allegro
+
 
 class PinchLoss(nn.Module):
 
@@ -23,7 +25,7 @@ class PinchLoss(nn.Module):
 
         fingertips = [8, 12, 16] # FreiHAND indices for index, middle, and ring fingertips
         thumb_labels = labels[:, 4, :]
-        thumb_positions = pred_positions[:, 4, :]
+        thumb_positions = pred_positions[:, freihand_to_allegro(4), :]
 
         for fingertip in fingertips:
             # Calculate distance between GT thumb and fingertip
@@ -34,8 +36,9 @@ class PinchLoss(nn.Module):
             mask = (torch.norm(label_distance, dim=-1) < self.threshold).float()
 
             # Calculate euclidian distance between predicted positions of thumb and fingertip
-            fingertip_positions = pred_positions[:, fingertip, :]
-            position_distance = ((thumb_positions - fingertip_positions) ** 2).sum(dim=-1)
+            fingertip_positions = pred_positions[:, freihand_to_allegro(fingertip), :]
+            # position_distance = ((thumb_positions - fingertip_positions) ** 2).sum(dim=-1)
+            position_distance = torch.norm(thumb_positions - fingertip_positions, dim=-1)
 
             pinch_loss += (mask * position_distance).mean() / (mask.sum() + 1e-7) * batch_size
             # Investigate normalizing by batch:
