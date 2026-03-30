@@ -15,6 +15,7 @@ from datasets.FreiHAND.heatmap_inference import heatmap_inference
 from models.math_utils import xyZ2XYZ, get_positions
 from losses.pinch_loss import PinchLoss
 from losses.hand_pose_loss import HandPoseLoss
+from losses.hand_shape_loss import HandShapeLoss
 
 
 def validate(model, val_loader, loss_func, image_size):
@@ -190,10 +191,12 @@ def train(
 
 
             pinch_loss = PinchLoss().forward(pred_pos, XYZ_GT)
-            hand_pose_loss = HandPoseLoss(beta=0.5).forward(pred_pos, gt_pos, pred_qpos, gt_qpos)
+            hand_pose_loss = HandPoseLoss().forward(pred_pos, gt_pos)
+            hand_shape_loss = HandShapeLoss().forward(pred_pos, gt_pos)
 
             print("Pinch loss:", pinch_loss)
             print("Hand pose loss:", hand_pose_loss)
+            print("Hand shape loss:", hand_shape_loss)
 
             # Calculate loss
             loss, heatmap_loss, depth_loss = loss_func(

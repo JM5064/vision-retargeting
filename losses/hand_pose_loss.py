@@ -6,10 +6,8 @@ from models.utils import freihand_to_allegro
 
 class HandPoseLoss(nn.Module):
 
-    def __init__(self, beta):
+    def __init__(self):
         super().__init__()
-
-        self.beta = beta
 
 
     def forward(self, pred_positions, gt_positions):
