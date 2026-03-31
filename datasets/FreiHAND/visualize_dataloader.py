@@ -59,7 +59,7 @@ def add_keypoints(image, keypoints, joint_names=None):
 
 def add_heatmap(heatmaps):
     """Create heatmap for each image """
-    num_keypoints = heatmaps.shape[0]
+    num_keypoints = heatmaps.shape[0] // 3
 
     # Combine heatmaps
     combined_heatmap = np.zeros(heatmaps[0].shape)

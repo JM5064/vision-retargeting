@@ -28,20 +28,25 @@ class SimpleBaselines(nn.Module):
         )
 
         # Heatmap path
-        self.deconv_layers = nn.Sequential(
-            DeconvLayer(in_channels=2048),
+        self.shared_deconv = DeconvLayer(in_channels=2048)
+
+        self.xy = nn.Sequential(
             DeconvLayer(),
-            DeconvLayer()
+            DeconvLayer(),
+            nn.Conv2d(in_channels=256, out_channels=num_keypoints, kernel_size=1)
         )
 
-        self.hm = nn.Conv2d(in_channels=256, out_channels=num_keypoints, kernel_size=1)
+        self.xz = nn.Sequential(
+            DeconvLayer(),
+            DeconvLayer(),
+            nn.Conv2d(in_channels=256, out_channels=num_keypoints, kernel_size=1)
+        )
 
-        # z regression path
-        self.gap = nn.AdaptiveAvgPool2d(1)
-        self.depth_mlp = nn.Sequential(
-            nn.Linear(2048, 512),
-            nn.ReLU(),
-            nn.Linear(512, num_keypoints)
+        # TODO: rename yz to zy...
+        self.yz = nn.Sequential(
+            DeconvLayer(),
+            DeconvLayer(),
+            nn.Conv2d(in_channels=256, out_channels=num_keypoints, kernel_size=1)
         )
 
 
@@ -50,16 +55,14 @@ class SimpleBaselines(nn.Module):
         x = self.backbone(x)    # 7x7x2048
 
         # Pass through deconvolution layers
-        heatmaps = self.deconv_layers(x)   # 56x56x256
+        x = self.shared_deconv(x)
 
-        # Generate heatmaps
-        heatmaps = self.hm(heatmaps)
+        # Generate marginal heatmaps
+        xy = self.xy(x)
+        xz = self.xz(x)
+        yz = self.yz(x)
 
-        # Pass through depth mlp
-        depths = self.gap(x).view(x.size(0), -1)
-        depths = self.depth_mlp(depths)
-
-        return heatmaps, depths
+        return torch.cat([xy, xz, yz], dim=1)
 
 
 class DeconvLayer(nn.Module):

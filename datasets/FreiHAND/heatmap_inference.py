@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from models.utils import DEVICE
+
 
 def get_heatmap_keypoints(heatmap_preds):
     """
@@ -96,3 +98,54 @@ def heatmap_inference_testing(heatmap_preds, heatmap_flipped_preds):
 
     return averaged_keypoints
 
+
+def marginal_heatmap_inference(heatmap_preds, z_min=-9.0, z_max=9.0):
+    """
+    heatmap_preds: (batch, num_keypoints*3, heatmap_size, heatmap_size)
+    
+    returns:
+        keypoints: (batch, num_keypoints, 3)
+    """
+    
+    batch_size, C, heatmap_size, _ = heatmap_preds.shape
+    num_keypoints = C // 3
+    z_range = z_max - z_min
+
+    # Split heatmaps into xy, xz, zy
+    xy_heatmaps = heatmap_preds[:, 0:num_keypoints]
+    xz_heatmaps = heatmap_preds[:, num_keypoints:2*num_keypoints]
+    zy_heatmaps = heatmap_preds[:, 2*num_keypoints:3*num_keypoints]
+
+    # 2. Get x, y coordinate from xy heatmap
+    flat_xy = xy_heatmaps.view(batch_size, num_keypoints, -1)
+    argmax_xy = torch.argmax(flat_xy, dim=-1) 
+    
+    x_idx = argmax_xy % heatmap_size
+    y_idx = argmax_xy // heatmap_size
+
+    # Get z from xy and zy heatmaps using predicted x and y
+    # Slice xz/zy planes and predicted x and y
+    batch_indices = torch.arange(batch_size, device=DEVICE).view(batch_size, 1).expand(batch_size, num_keypoints)
+    joint_indices = torch.arange(num_keypoints, device=DEVICE).view(1, num_keypoints).expand(batch_size, num_keypoints)
+
+    # Slice xz heatmap using our predicted x and get z value
+    z_slice_xz = xz_heatmaps[batch_indices, joint_indices, :, x_idx]
+    z_idx_xz = torch.argmax(z_slice_xz, dim=-1)
+
+    # Slice zy heatmap using our predicted y and get z value
+    z_slice_zy = zy_heatmaps[batch_indices, joint_indices, y_idx, :]
+    z_idx_zy = torch.argmax(z_slice_zy, dim=-1)
+
+    # Average the z from xz and zy heatmaps
+    z_idx_avg = (z_idx_xz.float() + z_idx_zy.float()) / 2.0
+    
+    # Normalize x and y outputs
+    x_norm = x_idx.float() / (heatmap_size - 1)
+    y_norm = y_idx.float() / (heatmap_size - 1)
+    
+    # Normalize z output
+    z_val = (z_idx_avg / (heatmap_size - 1)) * z_range + z_min
+
+    keypoints = torch.stack([x_norm, y_norm, z_val], dim=-1)
+
+    return keypoints

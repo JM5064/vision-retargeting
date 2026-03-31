@@ -110,7 +110,8 @@ class FreiHAND(Dataset):
         tensor_keypoints = torch.tensor(normalized_keypoints, dtype=torch.float32)
 
         # Create heatmaps
-        heatmaps = self.create_heatmaps(projected_keypoints)
+        # heatmaps = self.create_heatmaps(projected_keypoints)
+        heatmaps = self.create_marginal_heatmaps(tensor_keypoints)
 
         # Convert image to numpy
         np_image = np.array(image)
@@ -154,13 +155,13 @@ class FreiHAND(Dataset):
     
 
     def create_heatmaps(self, keypoints, sigma=1.0):
-        """
+        """Creates xy heatmaps for each joint
         args:
             keypoints: np.array([[x1, y1, Z1], ...])
             sigma: standard deviation for Gaussian heatmap
 
         returns:
-            heatmaps: np.array of heatmaps
+            heatmaps: np.array of (num_keypoints, heatmap_size, heatmap_size) heatmaps
         """
         num_keypoints = len(keypoints)
 
@@ -190,10 +191,50 @@ class FreiHAND(Dataset):
         return heatmaps
 
 
+    def create_marginal_heatmaps(self, keypoints, sigma=1.0, z_min=-9.0, z_max=9.0):
+        """Creates xy, xz, yz heatmaps for each joint
+        args:
+            keypoints: np.array([[x1, y1, Z1], ...])
+            sigma: standard deviation for Gaussian heatmap
+            z_min, z_max: min/max values of scale normalized Z
+
+        returns:
+            heatmaps: np.array of (num_keypoints*3, heatmap_size, heatmap_size) heatmaps
+        """
+
+        # Define the range of z values
+        z_range = z_max - z_min
+        
+        # Create coordinate grid
+        grid = np.arange(self.heatmap_size, dtype=np.float32)
+        xx, yy = np.meshgrid(grid, grid)
+
+        # Scale x, y to [0, heatmap_size]
+        scaled_x = keypoints[:, 0] * (self.heatmap_size - 1)
+        scaled_y = keypoints[:, 1] * (self.heatmap_size - 1)
+
+        # Scale Z: shift by z_min, normalize to [0, 1], scale to [0, heatmap_size]
+        scaled_z = ((keypoints[:, 2] - z_min) / z_range) * (self.heatmap_size - 1)
+
+        # Reshape for broadcasting
+        xs, ys, zs = [c.reshape(-1, 1, 1) for c in [scaled_x, scaled_y, scaled_z]]
+
+        # Create xy heatmap
+        xy_heatmap = np.exp(-((xs - xx)**2 + (ys - yy)**2) / (2 * sigma**2))
+        
+        # Create xz heatmap
+        xz_heatmap = np.exp(-((xs - xx)**2 + (zs - yy)**2) / (2 * sigma**2))
+        
+        # Create zy heatmap
+        zy_heatmap = np.exp(-((zs - xx)**2 + (ys - yy)**2) / (2 * sigma**2))
+        
+        return np.concatenate([xy_heatmap, xz_heatmap, zy_heatmap], axis=0)
+
+
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
     import albumentations as A
-    from models.math_utils import reproject_xyZ2XYZ
+    # from models.math_utils import reproject_xyZ2XYZ
 
     images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
     keypoints_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
@@ -226,10 +267,10 @@ if __name__ == "__main__":
             if i == 1: # keypoints
                 keypoints = item[i]
                 # Unnormalize xy
-                keypoints[:, :, :2] *= 224
+                # keypoints[:, :, :2] *= 224
 
                 # Unnormalize depth
-                keypoints[:, :, 2] += item[5]
+                # keypoints[:, :, 2] += item[5]
                 # xn = keypoints[0][0][0]
                 # yn = keypoints[0][0][1]
                 # Zn = keypoints[0][0][2]
@@ -247,12 +288,12 @@ if __name__ == "__main__":
                 # print("Calculated:", root, " Actual:", item[5])
 
                 # Reproject to XYZ
-                keypoints = reproject_xyZ2XYZ(keypoints, item[4])
+                # keypoints = reproject_xyZ2XYZ(keypoints, item[4])
 
                 # Undo scaling
-                keypoints *= item[6]
+                # keypoints *= item[6]
 
-                print(keypoints)
+                print(torch.max(torch.abs(keypoints[:, :, 2])))
                 print("--------------------------------")
 
         break

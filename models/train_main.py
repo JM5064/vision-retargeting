@@ -17,7 +17,7 @@ from models.train import train
 from models.utils import load_checkpoint, DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
 
-from losses.combined_loss import CombinedLoss
+from losses.heatmap_loss import HeatmapLoss
 
 
 if __name__ == "__main__":
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     np.random.seed(5064)
 
     train_transform = A.Compose([
-        A.Rotate(limit=[-45, 45]),
+        A.Rotate(limit=[-45, 45], p=0.6),
         A.ColorJitter(brightness=[0.8, 1.2], contrast=[0.8, 1.2], saturation=[0.8, 1.2], hue=[-0.05, 0.05]),
         A.Normalize(mean=[0.472, 0.450, 0.413],
                             std=[0.277, 0.272, 0.273]),
@@ -148,17 +148,17 @@ if __name__ == "__main__":
     total_epochs = 75
     scheduler = convnext_scheduler(optimizer, warmup_epochs, total_epochs)
 
-    # model, optimizer, scheduler, epoch = load_checkpoint("runs/2026.3.27/last.pt", model, optimizer, scheduler)
+    model, optimizer, scheduler, epoch = load_checkpoint("runs/2026.3.31-marginal-zy/last.pt", model, optimizer, scheduler)
 
     train(
         model, 
         num_epochs=total_epochs, 
-        start_epoch=0,
+        start_epoch=epoch,
         train_loader=train_loader, 
         val_loader=val_loader, 
         test_loader=test_loader, 
-        loss_func=CombinedLoss(), 
+        loss_func=HeatmapLoss(), 
         optimizer=optimizer, 
         scheduler=scheduler,
-        runs_dir='runs'
+        runs_dir='runs/2026.3.31-marginal-zy'
     )

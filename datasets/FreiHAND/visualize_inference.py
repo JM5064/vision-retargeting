@@ -17,7 +17,7 @@ from models.model import SimpleBaselines
 from models.utils import DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
 from datasets.FreiHAND.visualize_dataloader import add_keypoints, add_heatmap
-from datasets.FreiHAND.heatmap_inference import heatmap_inference
+from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
 from models.math_utils import xyZ2XYZ
 
 
@@ -55,10 +55,10 @@ def inference(model, dataset):
         with torch.no_grad():
             input_tensor = torch.tensor(image).unsqueeze(0)
 
-            heatmap_predictions, depth_predictions = model(input_tensor)
+            heatmap_predictions = model(input_tensor)
 
             # Convert heatmap preds to keypoints
-            keypoint_predictions = heatmap_inference(heatmap_predictions).squeeze()
+            keypoint_predictions = marginal_heatmap_inference(heatmap_predictions).squeeze()
 
         # Convert PIL image to numpy
         image = np.array(image)
@@ -69,13 +69,12 @@ def inference(model, dataset):
         image = denormalize_color(image, mean=[0.472, 0.450, 0.413], std=[0.277, 0.272, 0.273])
 
         # Create keypoint image
-        keypoints_image = add_keypoints(image, keypoint_predictions)
+        keypoints_image = add_keypoints(image, keypoint_predictions[:, :2])
 
         # Create heatmap image
         heatmap_image = add_heatmap(heatmap_predictions.squeeze())
 
-        pred_xyz = torch.cat([keypoint_predictions.unsqueeze(0), depth_predictions.unsqueeze(-1)], dim=-1)
-        create_3d_visualization(pred_xyz, gt_keypoints, K, wrist_depth, scale, ax)
+        create_3d_visualization(keypoint_predictions.unsqueeze(dim=0), gt_keypoints, K, wrist_depth, scale, ax)
         plt.draw()
 
         cv2.imshow("Keypoints", keypoints_image)
@@ -153,7 +152,7 @@ def plot_hand_3d(gt_3d: np.ndarray, pred_3d: np.ndarray, ax):
 
 
 if __name__ == "__main__":
-    model_path = "runs/2026.3.27/last.pt"
+    model_path = "runs/2026.3.31-marginal-hm/last.pt"
 
     model = load_model(model_path)
 

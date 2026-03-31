@@ -5,15 +5,13 @@ import numpy as np
 import time
 
 import torch
-import pytorch_kinematics as pk
 from metrics.mpjpe import mpjpe_3D
 from metrics.pck import pck_2D, pck_3D
 from models.utils import DEVICE, log_results
 
-from datasets.FreiHAND.heatmap_inference import heatmap_inference
+from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
 
 from models.math_utils import xyZ2XYZ
-from losses.pinch_loss import PinchLoss
 
 
 def validate(model, val_loader, loss_func, image_size):
@@ -21,8 +19,6 @@ def validate(model, val_loader, loss_func, image_size):
     all_preds = []
     all_labels = []
     total_combined_loss = 0.0
-    total_heatmap_loss = 0.0
-    total_depth_loss = 0.0
 
     mpjpe = 0.0
     pck3D_thresholds = [20, 40]
@@ -38,25 +34,18 @@ def validate(model, val_loader, loss_func, image_size):
             scales = scales.to(DEVICE)
 
             # Get predictions for heatmap path and depth
-            heatmap_outputs, depth_outputs = model(inputs)
+            heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
-            keypoint_predictions = heatmap_inference(heatmap_outputs)
-
-            # Combine xy and depth
-            keypoint_predictions = torch.cat([keypoint_predictions, depth_outputs.unsqueeze(-1)], dim=-1)
+            keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
 
             # Convert xyZ back to XYZ
             labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
 
             # Calculate losses
-            loss, heatmap_loss, depth_loss = loss_func(
-                heatmap_outputs, heatmaps, depth_outputs, keypoints[:, :, 2]
-            )
+            loss = loss_func(heatmap_outputs, heatmaps)
             total_combined_loss += loss.item()
-            total_heatmap_loss += heatmap_loss.item()
-            total_depth_loss += depth_loss.item()
 
             all_preds.extend(keypoint_predictions.cpu().numpy().squeeze())
             all_labels.extend(keypoints.cpu().numpy())
@@ -77,8 +66,6 @@ def validate(model, val_loader, loss_func, image_size):
     pck3Ds /= len(all_preds)
 
     average_val_loss = total_combined_loss / len(val_loader)
-    average_val_heatmap_loss = total_heatmap_loss / len(val_loader)
-    average_val_depth_loss = total_depth_loss / len(val_loader)
     
     # Flatten
     all_preds_flattened = np.concatenate(all_preds, axis=0)
@@ -106,8 +93,6 @@ def validate(model, val_loader, loss_func, image_size):
         "pck@40mm": pck3Ds[1],
         "mpjpe": mpjpe,
         "average_val_loss": average_val_loss,
-        "average_val_depth_loss": average_val_depth_loss,
-        "average_val_heatmap_loss": average_val_heatmap_loss,
     }
 
     return metrics
@@ -118,7 +103,7 @@ def train(
         num_epochs,
         train_loader, val_loader, test_loader,
         loss_func, optimizer, scheduler,
-        start_epoch=0, unfreeze_epoch=40,
+        start_epoch=0, 
         image_size=224,
         runs_dir="runs",
     ):
@@ -138,8 +123,6 @@ def train(
         print(f'Epoch {epoch+1}/{num_epochs}')
         
         total_combined_loss = 0.0
-        total_heatmap_loss = 0.0
-        total_depth_loss = 0.0
 
         model.train()
         for _ in tqdm(range(steps_per_epoch)):
@@ -159,35 +142,24 @@ def train(
             optimizer.zero_grad()
 
             # Get predictions for heatmap path and depth
-            heatmap_outputs, depth_outputs = model(inputs)
+            heatmap_outputs = model(inputs)
 
             # Calculate loss
-            loss, heatmap_loss, depth_loss = loss_func(
-                heatmap_outputs, heatmaps, depth_outputs, keypoints[:, :, 2]
-            )
+            loss = loss_func(heatmap_outputs, heatmaps)
             loss.backward()
             optimizer.step()
 
             total_combined_loss += loss.item()
-            total_heatmap_loss += heatmap_loss.item()
-            total_depth_loss += depth_loss.item()
 
         # print and log metrics
         average_train_loss = total_combined_loss / steps_per_epoch
-        average_train_heatmap_loss = total_heatmap_loss / steps_per_epoch
-        average_train_depth_loss = total_depth_loss / steps_per_epoch
 
         metrics = validate(model, val_loader, loss_func, image_size)
         metrics["average_train_loss"] = average_train_loss
-        metrics["average_train_depth_loss"] = average_train_depth_loss
-        metrics["average_train_heatmap_loss"] = average_train_heatmap_loss
-
 
         print(f'Epoch {epoch+1} Results:')
-        print(f'Train Loss: {average_train_loss} | Heatmap: {average_train_heatmap_loss}'
-            f' | Depth: {average_train_depth_loss}')
-        print(f'Val Loss:   {metrics["average_val_loss"]} | Heatmap: {metrics["average_val_heatmap_loss"]}'
-            f' | Depth: {metrics["average_val_depth_loss"]}')
+        print(f'Train Loss: {average_train_loss}')
+        print(f'Val Loss:   {metrics["average_val_loss"]}')
         print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
         print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
         print(f'MPJPE: {metrics["mpjpe"]}')
