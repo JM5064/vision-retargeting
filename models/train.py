@@ -16,13 +16,19 @@ from models.math_utils import xyZ2XYZ
 
 def validate(model, val_loader, loss_func, image_size):
     model.eval()
-    all_preds = []
-    all_labels = []
+
     total_combined_loss = 0.0
 
     mpjpe = 0.0
     pck3D_thresholds = [20, 40]
     pck3Ds = np.zeros(len(pck3D_thresholds))
+
+    total_abs_error = 0.0
+    total_elements = 0
+
+    pck005_total = 0.0
+    pck02_total = 0.0
+    total_samples = 0
 
     with torch.no_grad():
         for inputs, keypoints, heatmaps, Ks, wrist_depths, scales in tqdm(val_loader):
@@ -47,44 +53,37 @@ def validate(model, val_loader, loss_func, image_size):
             loss = loss_func(heatmap_outputs, heatmaps)
             total_combined_loss += loss.item()
 
-            all_preds.extend(keypoint_predictions.cpu().numpy().squeeze())
-            all_labels.extend(keypoints.cpu().numpy())
+            batch_size = keypoints.shape[0]
 
-            # Calculate mpjpe on batch
+            # Calculate MAE
+            total_abs_error += torch.abs(keypoint_predictions - keypoints).sum().item()
+            total_elements += keypoint_predictions.numel()
+
+            # Calculate mpjpe
             batch_mpjpe = mpjpe_3D(pred_XYZ, labels_XYZ)
             # Multiply by batch size to get total pjpe for the batch
-            mpjpe += batch_mpjpe.item() * keypoints.shape[0]
+            mpjpe += batch_mpjpe.item() * batch_size
 
-            # Calculate 3D pcks on batch
+            # Calculate 3D pcks
             for i in range(len(pck3D_thresholds)):
                 batch_pck = pck_3D(pred_XYZ, labels_XYZ, pck3D_thresholds[i])
-                pck3Ds[i] += batch_pck.item() * keypoints.shape[0]
+                pck3Ds[i] += batch_pck.item() * batch_size
 
+            # Calculate 2D pcks
+            # For FreiHAND: p1 = 9 (middle finger bottom), p2 = 12 (middle finger top) (not conventional)
+            pck005_total += pck_2D(keypoint_predictions[..., :2], keypoints[..., :2], 0.05, 9, 12).item() * batch_size
+            pck02_total += pck_2D(keypoint_predictions[..., :2], keypoints[..., :2], 0.2, 9, 12).item() * batch_size
+            total_samples += batch_size
 
     # Divide by # of images
-    mpjpe /= len(all_preds)
-    pck3Ds /= len(all_preds)
+    mae = total_abs_error / total_elements
+    mpjpe /= total_samples
+    pck3Ds /= total_samples
+    pck005 = pck005_total / total_samples
+    pck02 = pck02_total / total_samples
 
     average_val_loss = total_combined_loss / len(val_loader)
     
-    # Flatten
-    all_preds_flattened = np.concatenate(all_preds, axis=0)
-    all_labels_flattened = np.concatenate(all_labels, axis=0)
-
-    preds_concat = torch.cat([torch.tensor(pred) for pred in all_preds_flattened])
-    labels_concat = torch.cat([torch.tensor(label) for label in all_labels_flattened])
-
-    mae = torch.mean(torch.abs(preds_concat - labels_concat)).item()
-
-    # Reshape to [batch, num_keypoints, 3]
-    preds_kp = preds_concat.view(-1, 21, 3)
-    labels_kp = labels_concat.view(-1, 21, 3)
-
-    # Calculate 2D pck metrics
-    # For FreiHAND: p1 = 9 (middle finger bottom), p2 = 12 (middle finger top) (not conventional)
-    pck005 = pck_2D(preds_kp[..., :2], labels_kp[..., :2], 0.05, 9, 12).item()
-    pck02 = pck_2D(preds_kp[..., :2], labels_kp[..., :2], 0.2, 9, 12).item()
-
     metrics = {
         "mae": mae,
         "pck@0.05": pck005,
