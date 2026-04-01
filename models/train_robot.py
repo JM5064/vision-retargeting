@@ -5,7 +5,6 @@ import numpy as np
 import time
 
 import torch
-import pytorch_kinematics as pk
 from metrics.mpjpe import mpjpe_3D
 from metrics.pck import pck_2D, pck_3D
 from models.utils import DEVICE, log_results
@@ -13,16 +12,16 @@ from models.utils import DEVICE, log_results
 from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
 
 from models.math_utils import xyZ2XYZ, get_positions
-from losses.pinch_loss import PinchLoss
-from losses.hand_pose_loss import HandPoseLoss
-from losses.hand_shape_loss import HandShapeLoss
-from losses.fingertip_orientation_loss import FingertipOrientationLoss
 
 
-def validate(model, val_loader, loss_func, image_size):
+def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
     model.eval()
     total_combined_loss = 0.0
     total_heatmap_loss = 0.0
+    total_pose_loss = 0.0
+    total_shape_loss = 0.0
+    total_orientation_loss = 0.0
+    total_pinch_loss = 0.0
 
     mpjpe = 0.0
     pck3D_thresholds = [20, 40]
@@ -44,19 +43,38 @@ def validate(model, val_loader, loss_func, image_size):
             wrist_depths = wrist_depths.to(DEVICE)
             scales = scales.to(DEVICE)
 
-            # Get predictions for heatmap path and depth
+            # Get heatmap predictions
             heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
             keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
 
             # Convert xyZ back to XYZ
-            labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
+            labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
 
-            # Calculate losses
-            loss = loss_func(heatmap_outputs, heatmaps)
+            # Subtract roots
+            pred_XYZ = pred_XYZ - pred_XYZ[:, 0:1, :]
+            labels_XYZ = labels_XYZ - labels_XYZ[:, 0:1, :]
+
+            # Calculate predicted and GT qpos
+            pred_qpos = ik_model.forward_batch(pred_XYZ)
+            gt_qpos = ik_model.forward_batch(labels_XYZ)
+
+            # Calculate FK
+            pred_pos = get_positions(fk_model.forward_kinematics(pred_qpos))
+            gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
+
+            # Calculate loss
+            loss, heatmap_loss, pose_loss, shape_loss, pinch_loss, orientation_loss = loss_func(
+                heatmap_outputs, heatmaps, pred_pos, gt_pos
+            )
             total_combined_loss += loss.item()
+            total_heatmap_loss += heatmap_loss.item()
+            total_pose_loss += pose_loss.item()
+            total_shape_loss += shape_loss.item()
+            total_orientation_loss += orientation_loss.item()
+            total_pinch_loss += pinch_loss.item()
 
             batch_size = keypoints.shape[0]
 
@@ -89,6 +107,11 @@ def validate(model, val_loader, loss_func, image_size):
     pck02 = pck02_total / total_samples
 
     average_val_loss = total_combined_loss / len(val_loader)
+    average_val_heatmap_loss = total_heatmap_loss / len(val_loader)
+    average_val_pose_loss = total_pose_loss / len(val_loader)
+    average_val_shape_loss = total_shape_loss / len(val_loader)
+    average_val_orientation_loss = total_orientation_loss / len(val_loader)
+    average_val_pinch_loss = total_pinch_loss / len(val_loader)
     
     metrics = {
         "mae": mae,
@@ -98,6 +121,11 @@ def validate(model, val_loader, loss_func, image_size):
         "pck@40mm": pck3Ds[1],
         "mpjpe": mpjpe,
         "average_val_loss": average_val_loss,
+        "average_val_heatmap_loss": average_val_heatmap_loss,
+        "average_val_pose_loss": average_val_pose_loss,
+        "average_val_shape_loss": average_val_shape_loss,
+        "average_val_orientation_loss": average_val_orientation_loss,
+        "average_val_pinch_loss": average_val_pinch_loss,
     }
 
     return metrics
@@ -129,6 +157,11 @@ def train(
         print(f'Epoch {epoch+1}/{num_epochs}')
         
         total_combined_loss = 0.0
+        total_heatmap_loss = 0.0
+        total_pose_loss = 0.0
+        total_shape_loss = 0.0
+        total_orientation_loss = 0.0
+        total_pinch_loss = 0.0
 
         model.train()
         for _ in tqdm(range(steps_per_epoch)):
@@ -150,56 +183,70 @@ def train(
 
             optimizer.zero_grad()
 
-            # Get predictions for heatmap path and depth
+            # Get heatmap prediction
             heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
             keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
 
             # Convert xyZ back to XYZ
-            labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
+            labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
 
             # Subtract roots
-            labels_XYZ = labels_XYZ - labels_XYZ[:, 0:1, :]
             pred_XYZ = pred_XYZ - pred_XYZ[:, 0:1, :]
+            labels_XYZ = labels_XYZ - labels_XYZ[:, 0:1, :]
 
             # Calculate predicted and GT qpos
-            gt_qpos = ik_model.forward_batch(labels_XYZ)
             pred_qpos = ik_model.forward_batch(pred_XYZ)
+            gt_qpos = ik_model.forward_batch(labels_XYZ)
 
             # Calculate FK
-            gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
             pred_pos = get_positions(fk_model.forward_kinematics(pred_qpos))
-
-
-            pinch_loss = PinchLoss().forward(pred_pos, labels_XYZ)
-            hand_pose_loss = HandPoseLoss().forward(pred_pos, gt_pos)
-            hand_shape_loss = HandShapeLoss().forward(pred_pos, gt_pos)
-            fingertip_orientation_loss = FingertipOrientationLoss().forward(pred_pos, gt_pos)
-
-            print("Pinch loss:", pinch_loss)
-            print("Hand pose loss:", hand_pose_loss)
-            print("Hand shape loss:", hand_shape_loss)
-            print("Fingertip orientation loss:", fingertip_orientation_loss)
+            gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
 
             # Calculate loss
-            loss = loss_func(heatmap_outputs, heatmaps)
+            loss, heatmap_loss, pose_loss, shape_loss, pinch_loss, orientation_loss = loss_func(
+                heatmap_outputs, heatmaps, pred_pos, gt_pos
+            )
             loss.backward()
             optimizer.step()
 
             total_combined_loss += loss.item()
+            total_heatmap_loss += heatmap_loss.item()
+            total_pose_loss += pose_loss.item()
+            total_shape_loss += shape_loss.item()
+            total_orientation_loss += orientation_loss.item()
+            total_pinch_loss += pinch_loss.item()
+
 
         # print and log metrics
         average_train_loss = total_combined_loss / steps_per_epoch
+        average_train_heatmap_loss = total_heatmap_loss / steps_per_epoch
+        average_train_pose_loss = total_pose_loss / steps_per_epoch
+        average_train_shape_loss = total_shape_loss / steps_per_epoch
+        average_train_orientation_loss = total_orientation_loss / steps_per_epoch
+        average_train_pinch_loss = total_pinch_loss / steps_per_epoch
 
-        metrics = validate(model, val_loader, loss_func, image_size)
+
+        metrics = validate(model, ik_model, fk_model, val_loader, loss_func, image_size)
         metrics["average_train_loss"] = average_train_loss
+        metrics["average_train_heatmap_loss"] = average_train_heatmap_loss
+        metrics["average_train_pose_loss"] = average_train_pose_loss
+        metrics["average_train_shape_loss"] = average_train_shape_loss
+        metrics["average_train_orientation_loss"] = average_train_orientation_loss
+        metrics["average_train_pinch_loss"] = average_train_pinch_loss
 
 
         print(f'Epoch {epoch+1} Results:')
-        print(f'Train Loss: {average_train_loss}')
-        print(f'Val Loss:   {metrics["average_val_loss"]}')
+        print(f'Train Loss:  {average_train_loss}\t| Heatmap: {average_train_heatmap_loss}')
+        print(f'Pose:        {average_train_pose_loss}\t| Shape: {average_train_shape_loss}')
+        print(f'Orientation: {average_train_orientation_loss}\t| Pinch: {average_train_pinch_loss}')
+        print()
+        print(f'Val Loss:    {metrics["average_val_loss"]}\t| Heatmap: {metrics["average_val_heatmap_loss"]}')
+        print(f'Pose:        {metrics["average_val_pose_loss"]}\t| Shape: {metrics["average_val_shape_loss"]}')
+        print(f'Orientation: {metrics["average_val_orientation_loss"]}\t| Pinch: {metrics["average_val_pinch_loss"]}')
+        print()
         print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
         print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
         print(f'MPJPE: {metrics["mpjpe"]}')
