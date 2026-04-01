@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 
-from models.utils import DEVICE
-
 
 def get_heatmap_keypoints(heatmap_preds):
     """
@@ -125,8 +123,8 @@ def marginal_heatmap_inference(heatmap_preds, z_min=-9.0, z_max=9.0):
 
     # Get z from xy and zy heatmaps using predicted x and y
     # Slice xz/zy planes and predicted x and y
-    batch_indices = torch.arange(batch_size, device=DEVICE).view(batch_size, 1).expand(batch_size, num_keypoints)
-    joint_indices = torch.arange(num_keypoints, device=DEVICE).view(1, num_keypoints).expand(batch_size, num_keypoints)
+    batch_indices = torch.arange(batch_size, device=heatmap_preds.device).view(batch_size, 1).expand(batch_size, num_keypoints)
+    joint_indices = torch.arange(num_keypoints, device=heatmap_preds.device).view(1, num_keypoints).expand(batch_size, num_keypoints)
 
     # Slice xz heatmap using our predicted x and get z value
     z_slice_xz = xz_heatmaps[batch_indices, joint_indices, :, x_idx]
