@@ -10,25 +10,30 @@ from metrics.mpjpe import mpjpe_3D
 from metrics.pck import pck_2D, pck_3D
 from models.utils import DEVICE, log_results
 
-from datasets.FreiHAND.heatmap_inference import heatmap_inference
+from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
 
 from models.math_utils import xyZ2XYZ, get_positions
 from losses.pinch_loss import PinchLoss
 from losses.hand_pose_loss import HandPoseLoss
 from losses.hand_shape_loss import HandShapeLoss
+from losses.fingertip_orientation_loss import FingertipOrientationLoss
 
 
 def validate(model, val_loader, loss_func, image_size):
     model.eval()
-    all_preds = []
-    all_labels = []
     total_combined_loss = 0.0
     total_heatmap_loss = 0.0
-    total_depth_loss = 0.0
 
     mpjpe = 0.0
     pck3D_thresholds = [20, 40]
     pck3Ds = np.zeros(len(pck3D_thresholds))
+
+    total_abs_error = 0.0
+    total_elements = 0
+
+    pck005_total = 0.0
+    pck02_total = 0.0
+    total_samples = 0
 
     with torch.no_grad():
         for inputs, keypoints, heatmaps, Ks, wrist_depths, scales in tqdm(val_loader):
@@ -40,66 +45,51 @@ def validate(model, val_loader, loss_func, image_size):
             scales = scales.to(DEVICE)
 
             # Get predictions for heatmap path and depth
-            heatmap_outputs, depth_outputs = model(inputs)
+            heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
-            keypoint_predictions = heatmap_inference(heatmap_outputs)
-
-            # Combine xy and depth
-            keypoint_predictions = torch.cat([keypoint_predictions, depth_outputs.unsqueeze(-1)], dim=-1)
+            keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
 
             # Convert xyZ back to XYZ
             labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
 
             # Calculate losses
-            loss, heatmap_loss, depth_loss = loss_func(
-                heatmap_outputs, heatmaps, depth_outputs, keypoints[:, :, 2]
-            )
+            loss = loss_func(heatmap_outputs, heatmaps)
             total_combined_loss += loss.item()
-            total_heatmap_loss += heatmap_loss.item()
-            total_depth_loss += depth_loss.item()
 
-            all_preds.extend(keypoint_predictions.cpu().numpy().squeeze())
-            all_labels.extend(keypoints.cpu().numpy())
+            batch_size = keypoints.shape[0]
 
-            # Calculate mpjpe on batch
+            # Calculate MAE
+            total_abs_error += torch.abs(keypoint_predictions - keypoints).sum().item()
+            total_elements += keypoint_predictions.numel()
+
+            # Calculate mpjpe
             batch_mpjpe = mpjpe_3D(pred_XYZ, labels_XYZ)
             # Multiply by batch size to get total pjpe for the batch
-            mpjpe += batch_mpjpe.item() * keypoints.shape[0]
+            mpjpe += batch_mpjpe.item() * batch_size
 
-            # Calculate 3D pcks on batch
+            # Calculate 3D pcks
             for i in range(len(pck3D_thresholds)):
                 batch_pck = pck_3D(pred_XYZ, labels_XYZ, pck3D_thresholds[i])
-                pck3Ds[i] += batch_pck.item() * keypoints.shape[0]
+                pck3Ds[i] += batch_pck.item() * batch_size
+
+            # Calculate 2D pcks
+            # For FreiHAND: p1 = 9 (middle finger bottom), p2 = 12 (middle finger top) (not conventional)
+            pck005_total += pck_2D(keypoint_predictions[..., :2], keypoints[..., :2], 0.05, 9, 12).item() * batch_size
+            pck02_total += pck_2D(keypoint_predictions[..., :2], keypoints[..., :2], 0.2, 9, 12).item() * batch_size
+            total_samples += batch_size
 
 
     # Divide by # of images
-    mpjpe /= len(all_preds)
-    pck3Ds /= len(all_preds)
+    mae = total_abs_error / total_elements
+    mpjpe /= total_samples
+    pck3Ds /= total_samples
+    pck005 = pck005_total / total_samples
+    pck02 = pck02_total / total_samples
 
     average_val_loss = total_combined_loss / len(val_loader)
-    average_val_heatmap_loss = total_heatmap_loss / len(val_loader)
-    average_val_depth_loss = total_depth_loss / len(val_loader)
     
-    # Flatten
-    all_preds_flattened = np.concatenate(all_preds, axis=0)
-    all_labels_flattened = np.concatenate(all_labels, axis=0)
-
-    preds_concat = torch.cat([torch.tensor(pred) for pred in all_preds_flattened])
-    labels_concat = torch.cat([torch.tensor(label) for label in all_labels_flattened])
-
-    mae = torch.mean(torch.abs(preds_concat - labels_concat)).item()
-
-    # Reshape to [batch, num_keypoints, 3]
-    preds_kp = preds_concat.view(-1, 21, 3)
-    labels_kp = labels_concat.view(-1, 21, 3)
-
-    # Calculate 2D pck metrics
-    # For FreiHAND: p1 = 9 (middle finger bottom), p2 = 12 (middle finger top) (not conventional)
-    pck005 = pck_2D(preds_kp[..., :2], labels_kp[..., :2], 0.05, 9, 12).item()
-    pck02 = pck_2D(preds_kp[..., :2], labels_kp[..., :2], 0.2, 9, 12).item()
-
     metrics = {
         "mae": mae,
         "pck@0.05": pck005,
@@ -108,8 +98,6 @@ def validate(model, val_loader, loss_func, image_size):
         "pck@40mm": pck3Ds[1],
         "mpjpe": mpjpe,
         "average_val_loss": average_val_loss,
-        "average_val_depth_loss": average_val_depth_loss,
-        "average_val_heatmap_loss": average_val_heatmap_loss,
     }
 
     return metrics
@@ -141,8 +129,6 @@ def train(
         print(f'Epoch {epoch+1}/{num_epochs}')
         
         total_combined_loss = 0.0
-        total_heatmap_loss = 0.0
-        total_depth_loss = 0.0
 
         model.train()
         for _ in tqdm(range(steps_per_epoch)):
@@ -165,66 +151,55 @@ def train(
             optimizer.zero_grad()
 
             # Get predictions for heatmap path and depth
-            heatmap_outputs, depth_outputs = model(inputs)
+            heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
-            keypoint_predictions = heatmap_inference(heatmap_outputs)
-
-            # Combine xy and depth
-            keypoint_predictions = torch.cat([keypoint_predictions, depth_outputs.unsqueeze(-1)], dim=-1)
+            keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
 
             # Convert xyZ back to XYZ
-            XYZ_GT = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
-            XYZ_pred = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
+            labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
+            pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
 
             # Subtract roots
-            XYZ_GT = XYZ_GT - XYZ_GT[:, 0:1, :]
-            XYZ_pred = XYZ_pred - XYZ_pred[:, 0:1, :]
+            labels_XYZ = labels_XYZ - labels_XYZ[:, 0:1, :]
+            pred_XYZ = pred_XYZ - pred_XYZ[:, 0:1, :]
 
             # Calculate predicted and GT qpos
-            gt_qpos = ik_model.forward_batch(XYZ_GT)
-            pred_qpos = ik_model.forward_batch(XYZ_pred)
+            gt_qpos = ik_model.forward_batch(labels_XYZ)
+            pred_qpos = ik_model.forward_batch(pred_XYZ)
 
             # Calculate FK
             gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
             pred_pos = get_positions(fk_model.forward_kinematics(pred_qpos))
 
 
-            pinch_loss = PinchLoss().forward(pred_pos, XYZ_GT)
+            pinch_loss = PinchLoss().forward(pred_pos, labels_XYZ)
             hand_pose_loss = HandPoseLoss().forward(pred_pos, gt_pos)
             hand_shape_loss = HandShapeLoss().forward(pred_pos, gt_pos)
+            fingertip_orientation_loss = FingertipOrientationLoss().forward(pred_pos, gt_pos)
 
             print("Pinch loss:", pinch_loss)
             print("Hand pose loss:", hand_pose_loss)
             print("Hand shape loss:", hand_shape_loss)
+            print("Fingertip orientation loss:", fingertip_orientation_loss)
 
             # Calculate loss
-            loss, heatmap_loss, depth_loss = loss_func(
-                heatmap_outputs, heatmaps, depth_outputs, keypoints[:, :, 2]
-            )
+            loss = loss_func(heatmap_outputs, heatmaps)
             loss.backward()
             optimizer.step()
 
             total_combined_loss += loss.item()
-            total_heatmap_loss += heatmap_loss.item()
-            total_depth_loss += depth_loss.item()
 
         # print and log metrics
         average_train_loss = total_combined_loss / steps_per_epoch
-        average_train_heatmap_loss = total_heatmap_loss / steps_per_epoch
-        average_train_depth_loss = total_depth_loss / steps_per_epoch
 
         metrics = validate(model, val_loader, loss_func, image_size)
         metrics["average_train_loss"] = average_train_loss
-        metrics["average_train_depth_loss"] = average_train_depth_loss
-        metrics["average_train_heatmap_loss"] = average_train_heatmap_loss
 
 
         print(f'Epoch {epoch+1} Results:')
-        print(f'Train Loss: {average_train_loss} | Heatmap: {average_train_heatmap_loss}'
-            f' | Depth: {average_train_depth_loss}')
-        print(f'Val Loss:   {metrics["average_val_loss"]} | Heatmap: {metrics["average_val_heatmap_loss"]}'
-            f' | Depth: {metrics["average_val_depth_loss"]}')
+        print(f'Train Loss: {average_train_loss}')
+        print(f'Val Loss:   {metrics["average_val_loss"]}')
         print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
         print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
         print(f'MPJPE: {metrics["mpjpe"]}')

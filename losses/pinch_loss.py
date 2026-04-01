@@ -6,42 +6,52 @@ from models.utils import freihand_to_allegro
 
 class PinchLoss(nn.Module):
 
-    def __init__(self, threshold=0.015):
+    def __init__(self, epsilon1=0.1, epsilon2=0.01):
         super().__init__()
 
-        # Pinching distance threshold (in meters)
-        self.threshold = threshold
+        self.epsilon1 = epsilon1
+        self.epsilon2 = epsilon2
 
 
-    def forward(self, pred_positions, labels):
-        """
-        args:
-            pred_positions: predicted robot link positions after FK
-            labels: FreiHAND 3D labels, [batch, num_keypoints, 3]
-        """
-        batch_size = labels.shape[0]
+    def forward(self, pred_positions, gt_positions):
+        fingertips = [5, 10, 15] # AllegroHand indices for index, middle, and ring fingertips
+
+        # Vector between fingertips and thumb
+        gamma_gt = gt_positions[:, fingertips, :] - gt_positions[:, freihand_to_allegro(4), :].unsqueeze(1)
+        gamma_pred = pred_positions[:, fingertips, :] - pred_positions[:, freihand_to_allegro(4), :].unsqueeze(1)
+
+        # Fingertips-thumb length of gt
+        d_i = torch.norm(gamma_gt, dim=-1)
+
+        # Normalize gamma_gt
+        gamma_gt_hat = gamma_gt / (d_i.unsqueeze(-1) + 1e-8)
+        rescaled = self.rescale(d_i)
+
+        sdi = self.calculate_sigmoid(d_i)
+
+        diff = torch.sum((gamma_pred - rescaled.unsqueeze(-1) * gamma_gt_hat)**2, dim=-1)
         
-        pinch_loss = 0
+        # Calculate weighted sum
+        loss = (sdi * diff).sum(dim=-1).mean()
 
-        fingertips = [8, 12, 16] # FreiHAND indices for index, middle, and ring fingertips
-        thumb_labels = labels[:, 4, :]
-        thumb_positions = pred_positions[:, freihand_to_allegro(4), :]
+        return loss
 
-        for fingertip in fingertips:
-            # Calculate distance between GT thumb and fingertip
-            fingertip_labels = labels[:, fingertip, :]
-            label_distance = thumb_labels - fingertip_labels
 
-            # Create mask for GT fingers which are pinching
-            mask = (torch.norm(label_distance, dim=-1) < self.threshold).float()
+    def calculate_sigmoid(self, d_i):
+        # Pass through sigmoid
+        sdi = torch.sigmoid(-10 * (d_i - self.epsilon1))
 
-            # Calculate euclidian distance between predicted positions of thumb and fingertip
-            fingertip_positions = pred_positions[:, freihand_to_allegro(fingertip), :]
-            # position_distance = ((thumb_positions - fingertip_positions) ** 2).sum(dim=-1)
-            position_distance = torch.norm(thumb_positions - fingertip_positions, dim=-1)
+        return sdi
+    
 
-            pinch_loss += (mask * position_distance).mean() / (mask.sum() + 1e-7) * batch_size
-            # Investigate normalizing by batch:
-            # pinch_loss += (mask * position_distance).sum() / (batch_size + 1e-7)
-            
-        return pinch_loss
+    def rescale(self, d_i):
+        # e2 <= d_o <= e1 term
+        scaled_d = (self.epsilon1 / (self.epsilon1 - self.epsilon2)) * (d_i - self.epsilon2)
+        
+        # If d_i < e2, then 0, else, scaled_d
+        result = torch.where(d_i < self.epsilon2, torch.zeros_like(d_i), scaled_d)
+        
+        # If d > e1, then d_i, else, result
+        result = torch.where(d_i > self.epsilon1, d_i, result)
+        
+        return result
