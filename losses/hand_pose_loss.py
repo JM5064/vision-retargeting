@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from models.utils import freihand_to_allegro
+from config.allegro import Allegro
 
 
 class HandPoseLoss(nn.Module):
@@ -13,8 +13,8 @@ class HandPoseLoss(nn.Module):
     def forward(self, pred_positions, gt_positions):
         # Lhand pose = p h thumb − p r thumb 2 2
 
-        thumb_gt_positions = gt_positions[:, freihand_to_allegro(4), :]
-        thumb_pred_positions = pred_positions[:, freihand_to_allegro(4), :]
+        thumb_gt_positions = gt_positions[:, Allegro.THUMB, :]
+        thumb_pred_positions = pred_positions[:, Allegro.THUMB, :]
 
         # Calculate thumb distances
         thumb_distances = torch.sum((thumb_pred_positions - thumb_gt_positions)**2, dim=-1).mean()

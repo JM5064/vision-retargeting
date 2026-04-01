@@ -39,14 +39,3 @@ def load_checkpoint(checkpoint_path, model, optimizer, scheduler):
 
     return model, optimizer, scheduler, checkpoint['epoch']
     
-
-def freihand_to_allegro(i):
-    mapping = {
-        0 : 0,      # Wrist -> base link
-        4 : 20,     # Thumb tip -> link_15.0_tip
-        8 : 5,      # Index tip -> link_3.0_tip
-        12 : 10,    # Middle tip -> link_7.0_tip
-        16 : 15,    # Ring tip -> link_11.0_tip
-    }
-
-    return mapping[i]

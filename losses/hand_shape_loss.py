@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from models.utils import freihand_to_allegro
+from config.allegro import Allegro
 
 
 class HandShapeLoss(nn.Module):
@@ -13,18 +13,16 @@ class HandShapeLoss(nn.Module):
 
 
     def forward(self, pred_positions, gt_positions):
-        fingertips = [5, 10, 15] # AllegroHand indices for index, middle, and ring fingertips
-
         # Vector between fingertips and wrist
-        v_gt = gt_positions[:, fingertips, :]
-        v_pred = pred_positions[:, fingertips, :]
+        v_gt = gt_positions[:, Allegro.FINGERTIPS, :]
+        v_pred = pred_positions[:, Allegro.FINGERTIPS, :]
 
         # Sum distances between pred and gt fingertip-wrist vectors
         dist = torch.sum((v_pred - v_gt)**2, dim=-1)
 
         # Calculate distance from each fingertip to thumb
-        gt_thumb = gt_positions[:, freihand_to_allegro(4), :].unsqueeze(1)
-        gt_tips = gt_positions[:, fingertips, :]
+        gt_thumb = gt_positions[:, Allegro.THUMB, :].unsqueeze(1)
+        gt_tips = gt_positions[:, Allegro.FINGERTIPS, :]
         d_i = torch.norm(gt_tips - gt_thumb, dim=-1)
 
         sdi = self.calculate_sigmoid(d_i)

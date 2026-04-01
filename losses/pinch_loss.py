@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from models.utils import freihand_to_allegro
+from config.allegro import Allegro
 
 
 class PinchLoss(nn.Module):
@@ -17,8 +17,8 @@ class PinchLoss(nn.Module):
         fingertips = [5, 10, 15] # AllegroHand indices for index, middle, and ring fingertips
 
         # Vector between fingertips and thumb
-        gamma_gt = gt_positions[:, fingertips, :] - gt_positions[:, freihand_to_allegro(4), :].unsqueeze(1)
-        gamma_pred = pred_positions[:, fingertips, :] - pred_positions[:, freihand_to_allegro(4), :].unsqueeze(1)
+        gamma_gt = gt_positions[:, fingertips, :] - gt_positions[:, Allegro.THUMB, :].unsqueeze(1)
+        gamma_pred = pred_positions[:, fingertips, :] - pred_positions[:, Allegro.THUMB, :].unsqueeze(1)
 
         # Fingertips-thumb length of gt
         d_i = torch.norm(gamma_gt, dim=-1)
