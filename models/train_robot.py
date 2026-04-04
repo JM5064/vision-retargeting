@@ -11,7 +11,7 @@ from models.utils import DEVICE, log_results
 
 from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
 
-from models.math_utils import xyZ2XYZ, get_positions
+from models.math_utils import xyZ2XYZ, get_positions, rotation_scale_normalize
 
 
 def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
@@ -53,9 +53,9 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
             labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
 
-            # Subtract roots
-            pred_XYZ = pred_XYZ - pred_XYZ[:, 0:1, :]
-            labels_XYZ = labels_XYZ - labels_XYZ[:, 0:1, :]
+            # Normalize predictions to match GeoRT
+            pred_XYZ = rotation_scale_normalize(pred_XYZ, scales)
+            labels_XYZ = rotation_scale_normalize(labels_XYZ, scales)
 
             # Calculate predicted and GT qpos
             pred_qpos = ik_model.forward_batch(pred_XYZ)
@@ -150,7 +150,7 @@ def train(
     best_pck005 = 0
 
     # training loop
-    steps_per_epoch = len(train_loader)
+    steps_per_epoch = len(train_loader) // 8
     train_iterator = iter(train_loader)
 
     for epoch in range(start_epoch, num_epochs):
@@ -193,9 +193,12 @@ def train(
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
             labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
 
-            # Subtract roots
-            pred_XYZ = pred_XYZ - pred_XYZ[:, 0:1, :]
-            labels_XYZ = labels_XYZ - labels_XYZ[:, 0:1, :]
+            print("pred_XYZ", pred_XYZ.shape, type(pred_XYZ))
+            print("Scales:", scales.shape, type(scales))
+
+            # Normalize predictions to match GeoRT
+            pred_XYZ = rotation_scale_normalize(pred_XYZ, scales)
+            labels_XYZ = rotation_scale_normalize(labels_XYZ, scales)
 
             # Calculate predicted and GT qpos
             pred_qpos = ik_model.forward_batch(pred_XYZ)
@@ -281,7 +284,7 @@ def train(
 
     # test model and print/log testing metrics
     print("Testing Model")
-    metrics = validate(model, test_loader, loss_func, image_size)
+    metrics = validate(model, ik_model, fk_model, test_loader, loss_func, image_size)
     print("Testing Results")
     print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
     print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
