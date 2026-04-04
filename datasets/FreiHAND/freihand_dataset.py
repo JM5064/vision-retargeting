@@ -231,6 +231,57 @@ class FreiHAND(Dataset):
         return np.concatenate([xy_heatmap, xz_heatmap, zy_heatmap], axis=0)
 
 
+    def rotation_scale_normalize(self, xyz, scale_factor):
+        """
+        Scales, root-normalizes, and aligns FreiHAND coordinates.
+        Alignment: Hand direction -> Z-axis, Palm Normal -> X-axis.
+        """
+        # Scale coordinates
+        xyz = xyz / scale_factor
+
+        # Multiply by scale factor to match with GeoRT
+        xyz = xyz * 0.028
+        
+        # Root normalize
+        wrist = xyz[0]
+        xyz = xyz - wrist
+        
+        # Define the Z-axis (Forward direction)
+        # Vector from Wrist (0) to Middle Finger MCP (9)
+        z_axis = xyz[9] - xyz[0]
+        z_axis /= np.linalg.norm(z_axis)
+        
+        # Define the Palm Normal (X-axis)
+        # Cross product of vectors to Index MCP (5) and Pinky MCP (17)
+        v_index = xyz[5] - xyz[0]
+        v_pinky = xyz[17] - xyz[0]
+        
+        # This vector is perpendicular to the palm
+        palm_normal = np.cross(v_index, v_pinky)
+        palm_normal /= np.linalg.norm(palm_normal)
+        
+        # Ensure Orthogonality
+        # We want palm_normal to be the X-axis, but it might not be perfectly 
+        # perpendicular to our Z-axis. We'll use cross products to fix that.
+        
+        # Y-axis is perpendicular to both Z (up) and X (normal)
+        y_axis = np.cross(z_axis, palm_normal)
+        y_axis /= np.linalg.norm(y_axis)
+        
+        # Re-calculate X-axis to ensure it is perfectly orthogonal to Y and Z
+        x_axis = np.cross(y_axis, z_axis)
+        
+        # Construct Rotation Matrix
+        # The rows of this matrix represent the new basis vectors
+        rotation_matrix = np.stack([x_axis, y_axis, z_axis])
+        
+        # Apply the transformation
+        # Using the dot product to project coordinates onto our new axes
+        transformed_coords = np.dot(xyz, rotation_matrix.T)
+        
+        return transformed_coords
+
+
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
     import albumentations as A
@@ -240,6 +291,11 @@ if __name__ == "__main__":
     keypoints_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
     intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
     scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
+
+    # images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training/rgb'
+    # keypoints_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_xyz.json'
+    # intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_K.json'
+    # scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/training_scale.json'
 
     transform = A.Compose([
         # A.Rotate(limit=[-45, 45]),
@@ -293,7 +349,8 @@ if __name__ == "__main__":
                 # Undo scaling
                 # keypoints *= item[6]
 
-                print(torch.max(torch.abs(keypoints[:, :, 2])))
+                print(keypoints)
+                print(item[6])
                 print("--------------------------------")
 
         break
