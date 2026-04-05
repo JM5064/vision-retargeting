@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
+from models.utils import DEVICE
 
 
 def get_heatmap_keypoints(heatmap_preds):
@@ -147,3 +149,55 @@ def marginal_heatmap_inference(heatmap_preds, z_min=-9.0, z_max=9.0):
     keypoints = torch.stack([x_norm, y_norm, z_val], dim=-1)
 
     return keypoints
+
+
+def marginal_soft_argmax(heatmaps, temperature=100.0):
+    """
+    heatmaps: [B, 3 * K, H, W] 
+    """
+    B, C, H, W = heatmaps.shape
+    num_keypoints = C // 3
+    
+    # 1. Create normalized coordinate grids (0 to 1)
+    # y is vertical (dim -2), x is horizontal (dim -1)
+    grid_y, grid_x = torch.meshgrid(
+        torch.linspace(0, 1, H, device=DEVICE),
+        torch.linspace(0, 1, W, device=DEVICE),
+        indexing='ij'
+    )
+
+    def get_2d_expectations(hm_slice):
+        # Softmax over the spatial dimensions to get a probability distribution
+        # Higher temperature = sharper peak (closer to hard argmax but differentiable)
+        probs = F.softmax(hm_slice.reshape(B, num_keypoints, -1) * temperature, dim=-1)
+        probs = probs.reshape(B, num_keypoints, H, W)
+        
+        # Expected values (center of mass)
+        mu_vert = torch.sum(probs * grid_y, dim=(-2, -1)) # Vertical axis
+        mu_horiz = torch.sum(probs * grid_x, dim=(-2, -1)) # Horizontal axis
+        return mu_horiz, mu_vert
+
+    # 2. Slice the concatenated heads
+    hm_xy = heatmaps[:, :num_keypoints, :, :]
+    hm_xz = heatmaps[:, num_keypoints:2*num_keypoints, :, :]
+    hm_zy = heatmaps[:, 2*num_keypoints:, :, :]
+
+    # 3. Harvest coordinates based on your specific axis mapping
+    # XY Head: Horiz=X, Vert=Y
+    x_xy, y_xy = get_2d_expectations(hm_xy)
+    
+    # XZ Head: Horiz=X, Vert=Z (Assuming standard vertical Z here)
+    x_xz, z_xz = get_2d_expectations(hm_xz)
+    
+    # ZY Head: Horiz=Z, Vert=Y (Your specific mapping)
+    z_zy, y_zy = get_2d_expectations(hm_zy)
+
+    # 4. Final Assembly
+    final_x = x_xy
+    final_y = y_xy
+    
+    # Z is averaged from the vertical of XZ and the horizontal of ZY
+    final_z = (z_xz + z_zy) / 2.0
+
+    # Stack into [B, K, 3]
+    return torch.stack([final_x, final_y, final_z], dim=-1)

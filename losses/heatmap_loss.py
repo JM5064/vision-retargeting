@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class HeatmapLoss(nn.Module):
@@ -9,202 +10,44 @@ class HeatmapLoss(nn.Module):
 
 
     def forward(self, heatmap_preds, heatmap_labels):
-        # Calculate heatmap loss
-        heatmap_loss = self.get_heatmap_loss(heatmap_preds, heatmap_labels)
+        _, C, _, _ = heatmap_preds.shape
+        num_keypoints = C // 3
 
-        return heatmap_loss
-    
+        # Split into xy, xz, zy
+        xy_preds = heatmap_preds[:, :num_keypoints]
+        xz_preds = heatmap_preds[:, num_keypoints:2*num_keypoints]
+        zy_preds = heatmap_preds[:, 2*num_keypoints:]
 
-    def get_heatmap_loss(self, heatmap_preds, heatmap_labels):
-        # Weight heatmap centers more
-        weight = 1 + heatmap_labels * 5
+        xy_labels = heatmap_labels[:, :num_keypoints]
+        xz_labels = heatmap_labels[:, num_keypoints:2*num_keypoints]
+        zy_labels = heatmap_labels[:, 2*num_keypoints:]
 
-        # Calculate squared errors between each pixel
-        squared_errors = weight * (heatmap_preds - heatmap_labels) ** 2
+        # Calculate Jensen–Shannon divergence for each heatmap
+        loss_xy = self.jensen_shannon_loss(xy_preds, xy_labels)
+        loss_xz = self.jensen_shannon_loss(xz_preds, xz_labels)
+        loss_zy = self.jensen_shannon_loss(zy_preds, zy_labels)
         
-        # Average squared errors
-        loss = squared_errors.sum(dim=(-1, -2)).mean()
+        return (loss_xy + loss_xz + loss_zy) / 3.0
 
-        return loss
-
-
-if __name__ == "__main__":
-    
-    # Batch of 2 images, each with 4 heatmaps (keypoint)
-    outputs = torch.tensor([[
-  [[ 0.05876667,  0.0341923,   0.04170455],
-   [ 0.02526864,  1.   ,       0.        ],
-   [ 0.10223284 , 0.08872547 , 0.08171601],],
-
-  [[ 0.04253661 , 0.04993252 , 1.        ],
-   [ 0.       ,   0.01551523 , 0.        ],
-   [ 0.       ,   0.        ,  0.        ],],
-
-  [[ 0.  ,        0.09648965 , 0.04289474],
-   [ 0.   ,       0.       ,   0.01977312],
-   [ 1.    ,      0.00681859,  0.08994387],],
-
-  [[ 1.1847503 , -0.15950353, -1.153223  ],
-   [ 1.1954792 ,  0.09920287, -1.0673612 ],
-   [ 1.1962554 , -0.41427466, -1.1790377 ],],
-
-  [[ 0.70964277 , 0.10642407, -1.1523796 ],
-   [ 0.95895326 , 0.1402679 , -0.9267467 ],
-   [ 0.9306994 ,  0.20709692, -0.8877255 ],],
-
-  [[ 1.071164 ,   0.28731325, -0.70997536],
-   [ 1.2408116,  -0.3008574,  -1.3985275 ],
-   [ 0.92702234 , 0.0527119 , -0.92846566],],
-
-  [[ 1.155614 ,   0.73428243,  1.0484738 ],
-   [-0.1447851,  -0.08495604, -0.04723351],
-   [-1.2103816 , -0.6709758, -1.3063859 ],],
-
-  [[ 0.6313487  , 0.91522   ,  0.9345102 ],
-   [ 0.03925323 ,-0.21379654 , 0.07501099],
-   [-0.7907384  ,-1.0169437  ,-1.0768998 ],],
-
-  [[ 0.84178454 , 0.81182843,  0.88322747],
-   [-0.2411037,  -0.19225848, -0.18855718],
-   [-1.0575825 , -1.1209294 , -1.3057429 ],],],
-
-
- [[[ 1.       ,   0.08327421 , 0.        ],
-   [ 0.27920726 , 0.08545765 , 0.05175537],
-   [ 0.19030483 , 0.02076549 , 0.07497669],],
-
-  [[ 0.       ,   0.      ,    0.06440201],
-   [ 0.       ,   0.06940016  ,1.        ],
-   [ 0.     ,     0.0305814 ,  0.14260352],],
-
-  [[ 0.       ,   0.04888642 , 0.03853447],
-   [ 0.       ,   0.         , 0.        ],
-   [ 0.      ,    0.03620698 , 1.        ],],
-
-  [[ 0.9926599 ,  0.31619334, -1.187189  ],
-   [ 1.0127217 , -0.11909217, -1.0663521 ],
-   [ 0.9706017 ,  0.2618264 , -0.9417418 ],],
-
-  [[ 1.110758   , 0.133791  , -1.1253853 ],
-   [ 1.0026455 , -0.39607802, -1.1395355 ],
-   [ 1.2930933 , -0.13127026, -0.9056795 ],],
-
-  [[ 0.8680734, -0.06632815 ,-1.1980896 ],
-   [ 1.2926099,  -0.35722947 ,-0.85772485],
-   [ 1.0101116,  -0.11903083 ,-0.835127  ],],
-
-  [[ 0.73396814  ,1.025793,    1.0097827 ],
-   [-0.23642878 , 0.48229727 , 0.1500724 ],
-   [-0.7075284 , -1.2690272 , -1.054638  ],],
-
-  [[ 1.1433359  , 0.84290695  ,1.3825088 ],
-   [-0.15843251 , 0.04981216, -0.02763808],
-   [-0.97045326 ,-0.9471542 , -1.1244587 ],],
-
-  [[ 0.96298546,  1.1732075 ,  1.2274717 ],
-   [ 0.08795285, -0.45698133,  0.2165819 ],
-   [-1.1468308,  -1.2393452,  -0.75113857],],],],)
-
-    labels = torch.tensor([[[
-        [ 0.,  0.,  0.,],
-        [ 0.,  1.,  0.,],
-        [ 0.,  0.,  0.,],],
-
-        [[ 0.,  0.,  1.,],
-        [ 0.,  0.,  0.,],
-        [ 0.,  0.,  0.,],],
-
-        [[ 0.,  0.,  0.,],
-        [ 0.,  0.,  0.,],
-        [ 1.,  0.,  0.,],],
-
-        [[ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],],
-
-        [[ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],],
-
-        [[ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],],
-
-        [[ 1.,  1.,  1.,],
-        [ 0.,  0.,  0.,],
-        [-1., -1., -1.,],],
-
-        [[ 1.,  1.,  1.,],
-        [ 0.,  0.,  0.,],
-        [-1., -1., -1.,],],
-
-        [[ 1.,  1.,  1.,],
-        [ 0.,  0.,  0.,],
-        [-1., -1., -1.,],],],
-
-
-        [[[ 1.,  0.,  0.,],
-        [ 0.,  0.,  0.,],
-        [ 0.,  0.,  0.,],],
-
-        [[ 0.,  0.,  0.,],
-        [ 0.,  0.,  1.,],
-        [ 0.,  0.,  0.,],],
-
-        [[ 0.,  0.,  0.,],
-        [ 0.,  0.,  0.,],
-        [ 0.,  0.,  1.,],],
-
-        [[ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],],
-
-        [[ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],],
-
-        [[ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],
-        [ 1.,  0., -1.,],],
-
-        [[ 1.,  1.,  1.,],
-        [ 0.,  0.,  0.,],
-        [-1., -1., -1.,],],
-
-        [[ 1.,  1.,  1.,],
-        [ 0.,  0.,  0.,],
-        [-1., -1., -1.,],],
-
-        [[ 1.,  1.,  1.,],
-        [ 0.,  0.,  0.,],
-        [-1., -1., -1.,],],],],
-    )
-
-    offset_masks = torch.tensor([[[
-        [ 0.,  0.,  0.,],
-        [ 0.,  1.,  0.,],
-        [ 0.,  0.,  0.,],],
-
-        [[ 0.,  0.,  1.,],
-        [ 0.,  0.,  0.,],
-        [ 0.,  0.,  0.,],],
-
-        [[ 0.,  0.,  0.,],
-        [ 0.,  0.,  0.,],
-        [ 1.,  0.,  0.,],]
-        ,],],
-    )
-
-    regression_labels = torch.tensor([
-        [[10, 20, 0], [29, 41, -1], [49, 59, 0]],
-        [[12, 22, 1], [29, 39, 1], [52, 62, -1]]
-    ])
-
-    criterion = HeatmapLoss()
-
-    loss = criterion(outputs, labels, regression_labels)
-    print("Total loss:", loss)
-
-
-
-
+    def jensen_shannon_loss(self, heatmap_preds, heatmap_labels):
+        """
+        pred_logits: Raw CNN output [B, K, H, W]
+        gt_heatmap: Your existing Gaussian GT [B, K, H, W]
+        """
+        # 1. Turn predicted logits into a probability distribution (sum to 1)
+        p = F.softmax(heatmap_preds.view(heatmap_preds.size(0), heatmap_preds.size(1), -1), dim=-1)
+        
+        # 2. Ensure GT is also a valid probability distribution
+        # Even if your GT is a Gaussian, it must sum to 1 for JSD
+        q = heatmap_labels.view(heatmap_labels.size(0), heatmap_labels.size(1), -1)
+        q = q / (q.sum(dim=-1, keepdim=True) + 1e-8)
+        
+        # 3. Calculate M = 0.5 * (P + Q)
+        m = 0.5 * (p + q)
+        
+        # 4. JSD = 0.5 * KL(P||M) + 0.5 * KL(Q||M)
+        # kl_div expects log-space for the first argument
+        kl_p_m = F.kl_div(m.log(), p, reduction='batchmean')
+        kl_q_m = F.kl_div(m.log(), q, reduction='batchmean')
+        
+        return 0.5 * (kl_p_m + kl_q_m)

@@ -17,7 +17,7 @@ from models.train import train
 from models.utils import load_checkpoint, DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
 
-from losses.heatmap_loss import HeatmapLoss
+from losses.combined_loss import CombinedLoss
 
 
 if __name__ == "__main__":
@@ -64,16 +64,16 @@ if __name__ == "__main__":
     # test_scale_json = train_scale_json
 
     # Train set as test set for testing
-    # test_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
-    # train_images_dir = test_images_dir
+    test_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
+    train_images_dir = test_images_dir
 
-    # test_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
-    # test_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
-    # test_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
+    test_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_xyz.json'
+    test_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
+    test_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
 
-    # train_kpts_json = test_kpts_json
-    # train_intrinsics_json = test_intrinsics_json
-    # train_scale_json = test_scale_json
+    train_kpts_json = test_kpts_json
+    train_intrinsics_json = test_intrinsics_json
+    train_scale_json = test_scale_json
 
 
     train_dataset = FreiHAND(
@@ -148,17 +148,17 @@ if __name__ == "__main__":
     total_epochs = 75
     scheduler = convnext_scheduler(optimizer, warmup_epochs, total_epochs)
 
-    model, optimizer, scheduler, epoch = load_checkpoint("runs/2026.3.31-marginal-zy/last.pt", model, optimizer, scheduler)
+    # model, optimizer, scheduler, epoch = load_checkpoint("runs/2026.3.31-marginal-zy/last.pt", model, optimizer, scheduler)
 
     train(
         model, 
         num_epochs=total_epochs, 
-        start_epoch=epoch,
+        start_epoch=0,
         train_loader=train_loader, 
         val_loader=val_loader, 
         test_loader=test_loader, 
-        loss_func=HeatmapLoss(), 
+        loss_func=CombinedLoss(), 
         optimizer=optimizer, 
         scheduler=scheduler,
-        runs_dir='runs/2026.3.31-marginal-zy'
+        runs_dir='runs'
     )
