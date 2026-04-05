@@ -54,12 +54,12 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
             labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
 
             # Normalize predictions to match GeoRT
-            pred_XYZ = rotation_scale_normalize(pred_XYZ, scales)
-            labels_XYZ = rotation_scale_normalize(labels_XYZ, scales)
+            pred_XYZ_norm = rotation_scale_normalize(pred_XYZ, scales)
+            labels_XYZ_norm = rotation_scale_normalize(labels_XYZ, scales)
 
             # Calculate predicted and GT qpos
-            pred_qpos = ik_model.forward_batch(pred_XYZ)
-            gt_qpos = ik_model.forward_batch(labels_XYZ)
+            pred_qpos = ik_model.forward_batch(pred_XYZ_norm)
+            gt_qpos = ik_model.forward_batch(labels_XYZ_norm)
 
             # Calculate FK
             pred_pos = get_positions(fk_model.forward_kinematics(pred_qpos))
@@ -192,9 +192,6 @@ def train(
             # Convert xyZ back to XYZ
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
             labels_XYZ = xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales)
-
-            print("pred_XYZ", pred_XYZ.shape, type(pred_XYZ))
-            print("Scales:", scales.shape, type(scales))
 
             # Normalize predictions to match GeoRT
             pred_XYZ = rotation_scale_normalize(pred_XYZ, scales)
