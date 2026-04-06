@@ -151,14 +151,19 @@ def marginal_heatmap_inference(heatmap_preds, z_min=-9.0, z_max=9.0):
     return keypoints
 
 
-def marginal_soft_argmax(heatmaps, temperature=100.0):
+def marginal_soft_argmax(heatmaps, temperature=10.0, z_min=-9.0, z_max=9.0):
     """
-    heatmaps: [B, 3 * K, H, W] 
+    args:
+        heatmaps: [batch_size, num_keypoints * 3, H, W] 
+
+    returns:
+        predicted xyZ keypoints [batch_size, num_keypoints, 3]
     """
     B, C, H, W = heatmaps.shape
     num_keypoints = C // 3
+    z_range = z_max - z_min
     
-    # 1. Create normalized coordinate grids (0 to 1)
+    # Create normalized coordinate grids (0 to 1)
     # y is vertical (dim -2), x is horizontal (dim -1)
     grid_y, grid_x = torch.meshgrid(
         torch.linspace(0, 1, H, device=DEVICE),
@@ -168,36 +173,31 @@ def marginal_soft_argmax(heatmaps, temperature=100.0):
 
     def get_2d_expectations(hm_slice):
         # Softmax over the spatial dimensions to get a probability distribution
-        # Higher temperature = sharper peak (closer to hard argmax but differentiable)
+        # Higher temperature = sharper peak
         probs = F.softmax(hm_slice.reshape(B, num_keypoints, -1) * temperature, dim=-1)
         probs = probs.reshape(B, num_keypoints, H, W)
         
-        # Expected values (center of mass)
+        # Expected values
         mu_vert = torch.sum(probs * grid_y, dim=(-2, -1)) # Vertical axis
         mu_horiz = torch.sum(probs * grid_x, dim=(-2, -1)) # Horizontal axis
         return mu_horiz, mu_vert
 
-    # 2. Slice the concatenated heads
-    hm_xy = heatmaps[:, :num_keypoints, :, :]
-    hm_xz = heatmaps[:, num_keypoints:2*num_keypoints, :, :]
-    hm_zy = heatmaps[:, 2*num_keypoints:, :, :]
+    # Get
+    xy_heatmap = heatmaps[:, :num_keypoints, :, :]
+    xz_heatmap = heatmaps[:, num_keypoints:2*num_keypoints, :, :]
+    zy_heatmap = heatmaps[:, 2*num_keypoints:, :, :]
 
-    # 3. Harvest coordinates based on your specific axis mapping
-    # XY Head: Horiz=X, Vert=Y
-    x_xy, y_xy = get_2d_expectations(hm_xy)
+    # Get x and y coordinates from xy heatmap
+    x_xy, y_xy = get_2d_expectations(xy_heatmap)
     
-    # XZ Head: Horiz=X, Vert=Z (Assuming standard vertical Z here)
-    x_xz, z_xz = get_2d_expectations(hm_xz)
+    # Get z coordinate from xz and zy heatmaps
+    x_xz, z_xz = get_2d_expectations(xz_heatmap)
+    z_zy, y_zy = get_2d_expectations(zy_heatmap)
     
-    # ZY Head: Horiz=Z, Vert=Y (Your specific mapping)
-    z_zy, y_zy = get_2d_expectations(hm_zy)
-
-    # 4. Final Assembly
-    final_x = x_xy
-    final_y = y_xy
-    
-    # Z is averaged from the vertical of XZ and the horizontal of ZY
+    # Get z from averaging z prediction from xz and zy heatmaps
     final_z = (z_xz + z_zy) / 2.0
 
-    # Stack into [B, K, 3]
-    return torch.stack([final_x, final_y, final_z], dim=-1)
+    # Unnormalize depth from [0, 1] to [-9, 9] range
+    final_z = (final_z * z_range) + z_min
+
+    return torch.stack([x_xy, y_xy, final_z], dim=-1)

@@ -37,7 +37,7 @@ def xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales):
     # Unnormalize xy
     xyz[:, :, :2] *= image_size
 
-    # Unnormalize depth
+    # Unnormalize depth with wrist depths
     xyz[:, :, 2] += wrist_depths.view(-1, 1)
 
     XYZ = reproject_xyZ2XYZ(xyz, Ks)
