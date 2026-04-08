@@ -12,8 +12,8 @@ class FingertipOrientationLoss(nn.Module):
 
     def forward(self, pred_positions, gt_positions):
         # Vector between fingertips and distal interphalangeal joints
-        r_gt = gt_positions[:, Allegro.FINGERTIPS, :] - gt_positions[:, Allegro.DIP_JOINTS, :]
-        r_pred = pred_positions[:, Allegro.FINGERTIPS, :] - pred_positions[:, Allegro.DIP_JOINTS, :]
+        r_gt = gt_positions[:, Allegro.ALL_FINGERTIPS, :] - gt_positions[:, Allegro.ALL_DIP_JOINTS, :]
+        r_pred = pred_positions[:, Allegro.ALL_FINGERTIPS, :] - pred_positions[:, Allegro.ALL_DIP_JOINTS, :]
 
         # Sum distances between pred and gt fingertip-dip_joint vectors
         dist = torch.sum((r_pred - r_gt)**2)

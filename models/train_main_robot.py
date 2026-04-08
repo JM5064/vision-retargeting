@@ -20,7 +20,7 @@ from datasets.FreiHAND.freihand_dataset import FreiHAND
 from GeoRT.geort.export import load_model
 import pytorch_kinematics as pk
 
-from losses.combined_loss import CombinedLoss
+from losses.combined_loss_robot import CombinedLoss
 
 
 if __name__ == "__main__":
@@ -85,7 +85,7 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=train_transform,
-        percent=0.0005
+        percent=0.95
     )
 
     val_dataset = FreiHAND(
@@ -94,7 +94,7 @@ if __name__ == "__main__":
         intrinsics_json=train_intrinsics_json,
         scale_json=train_scale_json,
         transform=transform,
-        percent=-0.0002
+        percent=-0.05
     )
     
     test_dataset = FreiHAND(
@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
     # --- INITIALIZE ROBOT MODELS ---
 
-    ik_model = load_model('allegro_right_last', epoch=50)
+    ik_model = load_model('allegro_right_freihand', epoch=30)
     ik_model.model.to(DEVICE)
     chain = pk.build_chain_from_urdf(open("config/allegro_hand_description_right.urdf").read()).to(device=DEVICE)
 
@@ -157,19 +157,19 @@ if __name__ == "__main__":
     total_epochs = 75
     scheduler = convnext_scheduler(optimizer, warmup_epochs, total_epochs)
 
-    # model, optimizer, scheduler, epoch = load_checkpoint("runs/2026.3.28-data_folds/last.pt", model, optimizer, scheduler)
+    model, optimizer, scheduler, epoch = load_checkpoint("runs_robot/2026.4.4-robot_freihand/last.pt", model, optimizer, scheduler)
 
     train(
         model, 
         ik_model=ik_model, 
         fk_model=chain, 
         num_epochs=total_epochs, 
-        start_epoch=0,
+        start_epoch=epoch,
         train_loader=train_loader, 
         val_loader=val_loader, 
         test_loader=test_loader, 
         loss_func=CombinedLoss(), 
         optimizer=optimizer, 
         scheduler=scheduler,
-        runs_dir='runs_robot'
+        runs_dir='runs_robot/2026.4.4-robot_freihand'
     )
