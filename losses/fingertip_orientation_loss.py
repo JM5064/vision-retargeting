@@ -18,4 +18,4 @@ class FingertipOrientationLoss(nn.Module):
         # Sum distances between pred and gt fingertip-dip_joint vectors
         dist = torch.sum((r_pred - r_gt)**2)
 
-        return dist
+        return dist.mean()

@@ -13,6 +13,9 @@ class HeatmapLoss(nn.Module):
         _, C, _, _ = heatmap_preds.shape
         num_keypoints = C // 3
 
+        if torch.isnan(heatmap_preds).any() or torch.isinf(heatmap_preds).any():
+            raise Exception("Heatmap predictions contain NaN/Inf before Loss")
+
         # Split into xy, xz, zy
         xy_preds = heatmap_preds[:, :num_keypoints]
         xz_preds = heatmap_preds[:, num_keypoints:2*num_keypoints]
@@ -30,23 +33,34 @@ class HeatmapLoss(nn.Module):
         return (loss_xy + loss_xz + loss_zy) / 3.0
     
 
-    def jensen_shannon_loss(self, heatmap_preds, heatmap_labels, eps=1e-8):
+    def jensen_shannon_loss(self, heatmap_preds, heatmap_labels, eps=1e-6):
+        B, K, _, _ = heatmap_preds.shape
+        
         # Softmax to get P
-        p = F.softmax(heatmap_preds.view(heatmap_preds.size(0), heatmap_preds.size(1), -1), dim=-1)
+        p = F.softmax(heatmap_preds.view(B, K, -1), dim=-1)
+        
+        # Calculate the sum of each joint's GT heatmap
+        # If sum is 0, the joint is off-screen
+        q_raw = heatmap_labels.view(B, K, -1)
+        joint_sums = q_raw.sum(dim=-1, keepdim=True) 
+        mask = (joint_sums > 0).float()
         
         # Normalize GT to get Q
-        q = heatmap_labels.view(heatmap_labels.size(0), heatmap_labels.size(1), -1)
-        q = q / (q.sum(dim=-1, keepdim=True) + eps)
+        q = q_raw / (joint_sums + eps)
         
         # Compute M = 0.5 * (P + Q)
         m = 0.5 * (p + q)
         
         # Clamping M ensures that we never take log(0)
         # We use log_m to pass into kl_div
-        log_m = torch.clamp(m, min=eps).log()
+        m = torch.clamp(m, min=eps)
         
-        # F.kl_div(input, target) expects input to be in log-space
-        kl_p_m = F.kl_div(log_m, p, reduction='batchmean')
-        kl_q_m = F.kl_div(log_m, q, reduction='batchmean')
+        # Calculate JSD per joint
+        kl_pm = F.kl_div(m.log(), p, reduction='none').sum(dim=-1)
+        kl_qm = F.kl_div(m.log(), q, reduction='none').sum(dim=-1)
+        jsd_per_joint = 0.5 * (kl_pm + kl_qm) # Shape: [B, K]
+
+        # Apply mask for visible joints
+        masked_loss = jsd_per_joint * mask.squeeze(-1)
         
-        return 0.5 * (kl_p_m + kl_q_m)
+        return masked_loss.sum() / (mask.sum() + eps)

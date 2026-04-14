@@ -23,7 +23,7 @@ class HandShapeLoss(nn.Module):
         # Calculate distance from each fingertip to thumb
         gt_thumb = gt_positions[:, Allegro.THUMB, :].unsqueeze(1)
         gt_tips = gt_positions[:, Allegro.ALL_FINGERTIPS, :]
-        d_i = torch.norm(gt_tips - gt_thumb, dim=-1)
+        d_i = torch.sqrt(torch.sum((gt_tips - gt_thumb)**2, dim=-1) + 1e-8)
 
         sdi = self.calculate_sigmoid(d_i).clone()
         sdi[:, 3] = 1.0  # Set thumb switch weight to 1

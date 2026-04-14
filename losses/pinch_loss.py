@@ -14,22 +14,25 @@ class PinchLoss(nn.Module):
 
 
     def forward(self, pred_positions, gt_positions):
-        fingertips = [5, 10, 15] # AllegroHand indices for index, middle, and ring fingertips
-
         # Vector between fingertips and thumb
-        gamma_gt = gt_positions[:, fingertips, :] - gt_positions[:, Allegro.THUMB, :].unsqueeze(1)
-        gamma_pred = pred_positions[:, fingertips, :] - pred_positions[:, Allegro.THUMB, :].unsqueeze(1)
+        gamma_gt = gt_positions[:, Allegro.FINGERTIPS, :] - gt_positions[:, Allegro.THUMB, :].unsqueeze(1)
+        gamma_pred = pred_positions[:, Allegro.FINGERTIPS, :] - pred_positions[:, Allegro.THUMB, :].unsqueeze(1)
 
         # Fingertips-thumb length of gt
-        d_i = torch.norm(gamma_gt, dim=-1)
+        d_i = torch.sqrt(torch.sum(gamma_gt**2, dim=-1) + 1e-8)
 
         # Normalize gamma_gt
-        gamma_gt_hat = gamma_gt / (d_i.unsqueeze(-1) + 1e-8)
-        rescaled = self.rescale(d_i)
+        diff = torch.sum((gamma_pred - gamma_gt)**2, dim=-1)
+
+        # For using rescaling function: 
+        # gamma_gt_hat = gamma_gt / (d_i.unsqueeze(-1) + 1e-8)
+        # rescaled = self.rescale(d_i)
+
+        # sdi = self.calculate_sigmoid(d_i)
+
+        # diff = torch.sum((gamma_pred - rescaled.unsqueeze(-1) * gamma_gt_hat)**2, dim=-1)
 
         sdi = self.calculate_sigmoid(d_i)
-
-        diff = torch.sum((gamma_pred - rescaled.unsqueeze(-1) * gamma_gt_hat)**2, dim=-1)
         
         # Calculate weighted sum
         loss = (sdi * diff).sum(dim=-1).mean()
