@@ -17,7 +17,7 @@ from models.model import SimpleBaselines
 from models.utils import DEVICE
 from datasets.FreiHAND.freihand_dataset import FreiHAND
 from datasets.FreiHAND.visualize_dataloader import add_keypoints, add_heatmap
-from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
+from datasets.FreiHAND.heatmap_inference import marginal_soft_argmax
 from models.math_utils import xyZ2XYZ
 
 
@@ -58,7 +58,7 @@ def inference(model, dataset):
             heatmap_predictions = model(input_tensor)
 
             # Convert heatmap preds to keypoints
-            keypoint_predictions = marginal_heatmap_inference(heatmap_predictions).squeeze()
+            keypoint_predictions = marginal_soft_argmax(heatmap_predictions).squeeze()
 
         # Convert PIL image to numpy
         image = np.array(image)
@@ -152,7 +152,7 @@ def plot_hand_3d(gt_3d: np.ndarray, pred_3d: np.ndarray, ax):
 
 
 if __name__ == "__main__":
-    model_path = "runs/2026.3.31-marginal-hm/last.pt"
+    model_path = "runs/2026.4.6-z-normalized/last.pt"
 
     model = load_model(model_path)
 

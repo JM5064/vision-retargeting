@@ -62,10 +62,14 @@ def add_heatmap(heatmaps):
     num_keypoints = heatmaps.shape[0] // 3
 
     # Combine heatmaps
-    combined_heatmap = np.zeros(heatmaps[0].shape)
+    combined_heatmap = np.zeros(heatmaps[0].shape, dtype=np.float32)
     for i in range(num_keypoints):
-        # if i == 1:
-        combined_heatmap += np.array(heatmaps[i])
+        # if i == 8:
+            combined_heatmap = np.maximum(combined_heatmap, np.array(heatmaps[i]))
+
+    max_val = combined_heatmap.max()
+    if max_val > 0:
+        combined_heatmap = combined_heatmap / max_val
 
     return combined_heatmap
 
