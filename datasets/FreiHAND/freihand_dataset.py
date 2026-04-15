@@ -67,6 +67,10 @@ class FreiHAND(Dataset):
         self.image_size = image_size
         self.heatmap_size = heatmap_size
 
+        self.z_min = -9.0
+        self.z_max = 9.0
+        self.z_range = self.z_max - self.z_min
+
 
     def __len__(self):
         return len(self.data)
@@ -105,12 +109,14 @@ class FreiHAND(Dataset):
 
         # Normalize xy between 0-1
         normalized_keypoints = self.normalize_keypoints(projected_keypoints)
+
+        # Normalize z between 0-1
+        normalized_keypoints[:, 2] = (normalized_keypoints[:, 2] - self.z_min) / self.z_range
         
         # Convert keypoints to tensor
         tensor_keypoints = torch.tensor(normalized_keypoints, dtype=torch.float32)
 
         # Create heatmaps
-        # heatmaps = self.create_heatmaps(projected_keypoints)
         heatmaps = self.create_marginal_heatmaps(tensor_keypoints)
 
         # Convert image to numpy
@@ -191,7 +197,7 @@ class FreiHAND(Dataset):
         return heatmaps
 
 
-    def create_marginal_heatmaps(self, keypoints, sigma=1.0, z_min=-9.0, z_max=9.0):
+    def create_marginal_heatmaps(self, keypoints, sigma=1.0):
         """Creates xy, xz, yz heatmaps for each joint
         args:
             keypoints: np.array([[x1, y1, Z1], ...])
@@ -201,20 +207,15 @@ class FreiHAND(Dataset):
         returns:
             heatmaps: np.array of (num_keypoints*3, heatmap_size, heatmap_size) heatmaps
         """
-
-        # Define the range of z values
-        z_range = z_max - z_min
         
         # Create coordinate grid
         grid = np.arange(self.heatmap_size, dtype=np.float32)
         xx, yy = np.meshgrid(grid, grid)
 
-        # Scale x, y to [0, heatmap_size]
+        # Scale x, y, z from [0, 1] to [0, heatmap_size]
         scaled_x = keypoints[:, 0] * (self.heatmap_size - 1)
         scaled_y = keypoints[:, 1] * (self.heatmap_size - 1)
-
-        # Scale Z: shift by z_min, normalize to [0, 1], scale to [0, heatmap_size]
-        scaled_z = ((keypoints[:, 2] - z_min) / z_range) * (self.heatmap_size - 1)
+        scaled_z = keypoints[:, 2] * (self.heatmap_size - 1)
 
         # Reshape for broadcasting
         xs, ys, zs = [c.reshape(-1, 1, 1) for c in [scaled_x, scaled_y, scaled_z]]
@@ -229,57 +230,6 @@ class FreiHAND(Dataset):
         zy_heatmap = np.exp(-((zs - xx)**2 + (ys - yy)**2) / (2 * sigma**2))
         
         return np.concatenate([xy_heatmap, xz_heatmap, zy_heatmap], axis=0)
-
-
-    def rotation_scale_normalize(self, xyz, scale_factor):
-        """
-        Scales, root-normalizes, and aligns FreiHAND coordinates.
-        Alignment: Hand direction -> Z-axis, Palm Normal -> X-axis.
-        """
-        # Scale coordinates
-        xyz = xyz / scale_factor
-
-        # Multiply by scale factor to match with GeoRT
-        xyz = xyz * 0.028
-        
-        # Root normalize
-        wrist = xyz[0]
-        xyz = xyz - wrist
-        
-        # Define the Z-axis (Forward direction)
-        # Vector from Wrist (0) to Middle Finger MCP (9)
-        z_axis = xyz[9] - xyz[0]
-        z_axis /= np.linalg.norm(z_axis)
-        
-        # Define the Palm Normal (X-axis)
-        # Cross product of vectors to Index MCP (5) and Pinky MCP (17)
-        v_index = xyz[5] - xyz[0]
-        v_pinky = xyz[17] - xyz[0]
-        
-        # This vector is perpendicular to the palm
-        palm_normal = np.cross(v_index, v_pinky)
-        palm_normal /= np.linalg.norm(palm_normal)
-        
-        # Ensure Orthogonality
-        # We want palm_normal to be the X-axis, but it might not be perfectly 
-        # perpendicular to our Z-axis. We'll use cross products to fix that.
-        
-        # Y-axis is perpendicular to both Z (up) and X (normal)
-        y_axis = np.cross(z_axis, palm_normal)
-        y_axis /= np.linalg.norm(y_axis)
-        
-        # Re-calculate X-axis to ensure it is perfectly orthogonal to Y and Z
-        x_axis = np.cross(y_axis, z_axis)
-        
-        # Construct Rotation Matrix
-        # The rows of this matrix represent the new basis vectors
-        rotation_matrix = np.stack([x_axis, y_axis, z_axis])
-        
-        # Apply the transformation
-        # Using the dot product to project coordinates onto our new axes
-        transformed_coords = np.dot(xyz, rotation_matrix.T)
-        
-        return transformed_coords
 
 
 if __name__ == "__main__":
