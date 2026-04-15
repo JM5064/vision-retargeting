@@ -54,18 +54,6 @@ if __name__ == "__main__":
     test_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_K.json'
     test_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation_scale.json'
 
-    # 64 images for testing
-    # train_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/rgb'
-    # test_images_dir = train_images_dir
-
-    # train_kpts_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_xyz.json'
-    # train_intrinsics_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_K.json'
-    # train_scale_json = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2/FreiHAND64/training_scale.json'
-
-    # test_kpts_json = train_kpts_json
-    # test_intrinsics_json = train_intrinsics_json
-    # test_scale_json = train_scale_json
-
     # Train set as test set for testing
     # test_images_dir = 'datasets/FreiHAND/FreiHAND/FreiHAND_pub_v2_eval/evaluation/rgb'
     # train_images_dir = test_images_dir
@@ -157,7 +145,7 @@ if __name__ == "__main__":
     total_epochs = 75
     scheduler = convnext_scheduler(optimizer, warmup_epochs, total_epochs)
 
-    model, optimizer, scheduler, epoch = load_checkpoint("runs_robot/2026.4.4-robot_freihand/last.pt", model, optimizer, scheduler)
+    model, optimizer, scheduler, epoch = load_checkpoint("runs_robot/2026.4.13-freihand-ik-ablation/epoch60.pt", model, optimizer, scheduler)
 
     train(
         model, 
@@ -171,5 +159,5 @@ if __name__ == "__main__":
         loss_func=CombinedLoss(), 
         optimizer=optimizer, 
         scheduler=scheduler,
-        runs_dir='runs_robot/2026.4.4-robot_freihand'
+        runs_dir='runs_robot/2026.4.13-freihand-ik-ablation'
     )
