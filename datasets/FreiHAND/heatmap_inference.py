@@ -151,7 +151,7 @@ def marginal_heatmap_inference(heatmap_preds, z_min=-9.0, z_max=9.0):
     return keypoints
 
 
-def marginal_soft_argmax(heatmaps, temperature=10.0, z_min=-9.0, z_max=9.0):
+def marginal_soft_argmax(heatmaps, temperature=10.0, device=DEVICE):
     """
     args:
         heatmaps: [batch_size, num_keypoints * 3, H, W] 
@@ -161,13 +161,12 @@ def marginal_soft_argmax(heatmaps, temperature=10.0, z_min=-9.0, z_max=9.0):
     """
     B, C, H, W = heatmaps.shape
     num_keypoints = C // 3
-    z_range = z_max - z_min
     
     # Create normalized coordinate grids (0 to 1)
     # y is vertical (dim -2), x is horizontal (dim -1)
     grid_y, grid_x = torch.meshgrid(
-        torch.linspace(0, 1, H, device=DEVICE),
-        torch.linspace(0, 1, W, device=DEVICE),
+        torch.linspace(0, 1, H, device=device),
+        torch.linspace(0, 1, W, device=device),
         indexing='ij'
     )
 
@@ -196,8 +195,5 @@ def marginal_soft_argmax(heatmaps, temperature=10.0, z_min=-9.0, z_max=9.0):
     
     # Get z from averaging z prediction from xz and zy heatmaps
     final_z = (z_xz + z_zy) / 2.0
-
-    # Unnormalize depth from [0, 1] to [-9, 9] range
-    final_z = (final_z * z_range) + z_min
 
     return torch.stack([x_xy, y_xy, final_z], dim=-1)
