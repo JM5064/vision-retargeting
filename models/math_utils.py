@@ -23,7 +23,7 @@ def reproject_xyZ2XYZ(xyz, K):
     return XYZ
 
 
-def xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales):
+def xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales, z_min=-9.0, z_max=9.0):
     """
     args:
         keypoints: [batch, num_keypoints, 3]
@@ -33,9 +33,13 @@ def xyZ2XYZ(keypoints, image_size, Ks, wrist_depths, scales):
 
     """
     xyz = keypoints.clone()
+    z_range = z_max - z_min
 
     # Unnormalize xy
     xyz[:, :, :2] *= image_size
+
+    # Unnormalize z
+    xyz[:, :, 2] = (xyz[:, :, 2] * z_range) + z_min
 
     # Unnormalize depth with wrist depths
     xyz[:, :, 2] += wrist_depths.view(-1, 1)
