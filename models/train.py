@@ -163,7 +163,7 @@ def train(
                 keypoint_predictions, keypoints, heatmap_outputs, heatmaps
             )
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             optimizer.step()
 
             total_combined_loss += loss.item()
@@ -182,7 +182,7 @@ def train(
 
         print(f'Epoch {epoch+1} Results:')
         print(f'Train Loss: {average_train_loss}  |  Keypoint: {average_train_keypoint_loss}  |  Heatmap: {average_train_heatmap_loss}')
-        print(f'Val Loss:   {metrics["average_val_loss"]}  |  Keypoint: {metrics["average_train_keypoint_loss"]}  |  Heatmap: {metrics["average_train_heatmap_loss"]}')
+        print(f'Val Loss:   {metrics["average_val_loss"]}  |  Keypoint: {metrics["average_val_keypoint_loss"]}  |  Heatmap: {metrics["average_val_heatmap_loss"]}')
         print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
         print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
         print(f'MPJPE: {metrics["mpjpe"]}')
@@ -210,8 +210,8 @@ def train(
         # Save last model
         torch.save(checkpoint, log_directory + "/last.pt")
 
-        # Save a model every 20 epochs
-        if (epoch+1) % 20 == 0:
+        # Save a model every 5 epochs
+        if (epoch+1) % 5 == 0:
             torch.save(checkpoint, f'{log_directory}/epoch{epoch+1}.pt')
 
 

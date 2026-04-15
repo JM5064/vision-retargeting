@@ -7,9 +7,10 @@ import time
 import torch
 from metrics.mpjpe import mpjpe_3D
 from metrics.pck import pck_2D, pck_3D
+from metrics.pinch_distance import calculate_pinch_distance
 from models.utils import DEVICE, log_results
 
-from datasets.FreiHAND.heatmap_inference import marginal_heatmap_inference
+from datasets.FreiHAND.heatmap_inference import marginal_soft_argmax
 
 from models.math_utils import xyZ2XYZ, get_positions, rotation_scale_normalize
 
@@ -17,6 +18,7 @@ from models.math_utils import xyZ2XYZ, get_positions, rotation_scale_normalize
 def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
     model.eval()
     total_combined_loss = 0.0
+    total_keypoint_loss = 0.0
     total_heatmap_loss = 0.0
     total_pose_loss = 0.0
     total_shape_loss = 0.0
@@ -34,6 +36,10 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
     pck02_total = 0.0
     total_samples = 0
 
+    total_pinch_dist = 0.0
+    total_pinch_successes = 0.0
+    total_intended_pinches = 0
+
     with torch.no_grad():
         for inputs, keypoints, heatmaps, Ks, wrist_depths, scales in tqdm(val_loader):
             inputs = inputs.to(DEVICE)
@@ -47,7 +53,7 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
             heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
-            keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
+            keypoint_predictions = marginal_soft_argmax(heatmap_outputs)
 
             # Convert xyZ back to XYZ
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
@@ -66,10 +72,11 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
             gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
 
             # Calculate loss
-            loss, heatmap_loss, pose_loss, shape_loss, pinch_loss, orientation_loss = loss_func(
-                heatmap_outputs, heatmaps, pred_pos, gt_pos
+            loss, keypoint_loss, heatmap_loss, pose_loss, shape_loss, pinch_loss, orientation_loss = loss_func(
+                keypoint_predictions, keypoints, heatmap_outputs, heatmaps, pred_pos, gt_pos
             )
             total_combined_loss += loss.item()
+            total_keypoint_loss += keypoint_loss.item()
             total_heatmap_loss += heatmap_loss.item()
             total_pose_loss += pose_loss.item()
             total_shape_loss += shape_loss.item()
@@ -98,6 +105,11 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
             pck02_total += pck_2D(keypoint_predictions[..., :2], keypoints[..., :2], 0.2, 9, 12).item() * batch_size
             total_samples += batch_size
 
+            # Calculate pinch distance
+            pinch_dis, success_pinches, num_pinches = calculate_pinch_distance(pred_pos, labels_XYZ)
+            total_pinch_dist += pinch_dis
+            total_pinch_successes += success_pinches
+            total_intended_pinches += num_pinches
 
     # Divide by # of images
     mae = total_abs_error / total_elements
@@ -105,8 +117,11 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
     pck3Ds /= total_samples
     pck005 = pck005_total / total_samples
     pck02 = pck02_total / total_samples
+    avg_pinch_dist = total_pinch_dist / total_intended_pinches
+    pinch_success_rate = (total_pinch_successes / total_intended_pinches) * 100
 
     average_val_loss = total_combined_loss / len(val_loader)
+    average_val_keypoint_loss = total_keypoint_loss / len(val_loader)
     average_val_heatmap_loss = total_heatmap_loss / len(val_loader)
     average_val_pose_loss = total_pose_loss / len(val_loader)
     average_val_shape_loss = total_shape_loss / len(val_loader)
@@ -120,7 +135,10 @@ def validate(model, ik_model, fk_model, val_loader, loss_func, image_size):
         "pck@20mm": pck3Ds[0],
         "pck@40mm": pck3Ds[1],
         "mpjpe": mpjpe,
+        "average_pinch_distance": avg_pinch_dist,
+        "pinch_success_rate": pinch_success_rate,
         "average_val_loss": average_val_loss,
+        "average_val_keypoint_loss": average_val_keypoint_loss,
         "average_val_heatmap_loss": average_val_heatmap_loss,
         "average_val_pose_loss": average_val_pose_loss,
         "average_val_shape_loss": average_val_shape_loss,
@@ -157,6 +175,7 @@ def train(
         print(f'Epoch {epoch+1}/{num_epochs}')
         
         total_combined_loss = 0.0
+        total_keypoint_loss = 0.0
         total_heatmap_loss = 0.0
         total_pose_loss = 0.0
         total_shape_loss = 0.0
@@ -187,7 +206,7 @@ def train(
             heatmap_outputs = model(inputs)
 
             # Get keypoint predictions from heatmap
-            keypoint_predictions = marginal_heatmap_inference(heatmap_outputs)
+            keypoint_predictions = marginal_soft_argmax(heatmap_outputs)
 
             # Convert xyZ back to XYZ
             pred_XYZ = xyZ2XYZ(keypoint_predictions, image_size, Ks, wrist_depths, scales)
@@ -206,13 +225,15 @@ def train(
             gt_pos = get_positions(fk_model.forward_kinematics(gt_qpos))
 
             # Calculate loss
-            loss, heatmap_loss, pose_loss, shape_loss, pinch_loss, orientation_loss = loss_func(
-                heatmap_outputs, heatmaps, pred_pos, gt_pos
+            loss, keypoint_loss, heatmap_loss, pose_loss, shape_loss, pinch_loss, orientation_loss = loss_func(
+                keypoint_predictions, keypoints, heatmap_outputs, heatmaps, pred_pos, gt_pos
             )
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
             optimizer.step()
 
             total_combined_loss += loss.item()
+            total_keypoint_loss += keypoint_loss.item()
             total_heatmap_loss += heatmap_loss.item()
             total_pose_loss += pose_loss.item()
             total_shape_loss += shape_loss.item()
@@ -222,6 +243,7 @@ def train(
 
         # print and log metrics
         average_train_loss = total_combined_loss / steps_per_epoch
+        average_train_keypoint_loss = total_keypoint_loss / steps_per_epoch
         average_train_heatmap_loss = total_heatmap_loss / steps_per_epoch
         average_train_pose_loss = total_pose_loss / steps_per_epoch
         average_train_shape_loss = total_shape_loss / steps_per_epoch
@@ -231,6 +253,7 @@ def train(
 
         metrics = validate(model, ik_model, fk_model, val_loader, loss_func, image_size)
         metrics["average_train_loss"] = average_train_loss
+        metrics["average_train_keypoint_loss"] = average_train_keypoint_loss
         metrics["average_train_heatmap_loss"] = average_train_heatmap_loss
         metrics["average_train_pose_loss"] = average_train_pose_loss
         metrics["average_train_shape_loss"] = average_train_shape_loss
@@ -239,11 +262,13 @@ def train(
 
 
         print(f'Epoch {epoch+1} Results:')
-        print(f'Train Loss:  {average_train_loss}\t| Heatmap: {average_train_heatmap_loss}')
+        print(f'Train Loss:  {average_train_loss}')
+        print(f'Keypoint Loss: {average_train_keypoint_loss}\t| Heatmap: {average_train_heatmap_loss}')
         print(f'Pose:        {average_train_pose_loss}\t| Shape: {average_train_shape_loss}')
         print(f'Orientation: {average_train_orientation_loss}\t| Pinch: {average_train_pinch_loss}')
         print()
-        print(f'Val Loss:    {metrics["average_val_loss"]}\t| Heatmap: {metrics["average_val_heatmap_loss"]}')
+        print(f'Val Loss:    {metrics["average_val_loss"]}')
+        print(f'Keypoint Loss: {metrics["average_val_keypoint_loss"]}\t| Heatmap: {metrics["average_val_heatmap_loss"]}')
         print(f'Pose:        {metrics["average_val_pose_loss"]}\t| Shape: {metrics["average_val_shape_loss"]}')
         print(f'Orientation: {metrics["average_val_orientation_loss"]}\t| Pinch: {metrics["average_val_pinch_loss"]}')
         print()
@@ -274,8 +299,8 @@ def train(
         # Save last model
         torch.save(checkpoint, log_directory + "/last.pt")
 
-        # Save a model every 20 epochs
-        if (epoch+1) % 20 == 0:
+        # Save a model every 5 epochs
+        if (epoch+1) % 5 == 0:
             torch.save(checkpoint, f'{log_directory}/epoch{epoch+1}.pt')
 
 
@@ -286,6 +311,8 @@ def train(
     print(f'PCK@0.05: {metrics["pck@0.05"]}\tPCK@0.2: {metrics["pck@0.2"]}')
     print(f'PCK@20mm: {metrics["pck@20mm"]}\tPCK@40mm: {metrics["pck@40mm"]}')
     print(f'MPJPE: {metrics["mpjpe"]}')
+    print(f'Average Pinch Distance: {metrics["average_pinch_distance"]}')
+    print(f'Pinch Success Rate: {metrics["pinch_success_rate"]}')    
     print(f'Test Loss: {metrics["average_val_loss"]}')
 
     test_logfile_path = log_directory + "/test_metrics.csv"
