@@ -31,7 +31,7 @@ def log_results(file_path, metrics):
 
 
 def load_checkpoint(checkpoint_path, model, optimizer, scheduler):
-    checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
 
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
